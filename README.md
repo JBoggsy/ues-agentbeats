@@ -39,7 +39,7 @@ uv run python -m src.purple --host 0.0.0.0 --port 8001
 src/
 ├── common/
 │   ├── a2a/          # A2A protocol helpers (complete)
-│   └── agentbeats/   # AgentBeats-specific utilities
+│   └── agentbeats/   # AgentBeats-specific utilities (complete)
 ├── green/            # Green agent implementation
 └── purple/           # Purple agent template
 scenarios/            # Assessment scenarios
@@ -57,12 +57,12 @@ docs/                 # Documentation
 
 ## TODO
 
-### Phase 2: Common AgentBeats Helper Code
-- [ ] Implement `src/common/agentbeats/messages.py` - Assessment message types
-- [ ] Implement `src/common/agentbeats/results.py` - Assessment results models
-- [ ] Implement `src/common/agentbeats/updates.py` - Task update helpers
-- [ ] Implement `src/common/agentbeats/config.py` - Configuration models
-- [ ] Write tests for serialization/validation
+### Phase 2: Common AgentBeats Helper Code ✅ COMPLETE
+- [x] Implement `src/common/agentbeats/messages.py` - Assessment message types
+- [x] Implement `src/common/agentbeats/results.py` - Assessment results models
+- [x] Implement `src/common/agentbeats/updates.py` - Task update helpers
+- [x] Implement `src/common/agentbeats/config.py` - Configuration models
+- [x] Write tests for serialization/validation (237 tests passing)
 
 ### Phase 3: Green Agent Implementation
 - [ ] Implement scenario schema and loader (`src/green/scenarios/`)

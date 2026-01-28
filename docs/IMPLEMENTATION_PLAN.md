@@ -220,19 +220,28 @@ def extract_json_from_artifact(artifact: Artifact) -> dict | None: ...
 
 ---
 
-## Phase 2: Common AgentBeats Helper Code
+## Phase 2: Common AgentBeats Helper Code ✅ COMPLETE
 
 **Location**: `src/common/agentbeats/`
 
+**Status**: Implemented and tested (237 tests passing). See [src/common/agentbeats/README.md](../src/common/agentbeats/README.md) for detailed documentation.
+
 AgentBeats-specific patterns and message types used by both Green and Purple agents.
 
-### 2.1 Assessment Messages (`messages.py`)
+### 2.1 Assessment Messages (`messages.py`) ✅ COMPLETE
 
 Pydantic models for AgentBeats-specific message payloads.
+
+> **Design Note**: All message models include a `message_type` field with a fixed
+> literal string value. This allows agents to easily parse incoming messages by
+> checking the `message_type` field rather than inferring the type from which
+> fields are present. The `message_type` is set as a class-level default and
+> cannot be overridden.
 
 ```python
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Literal
 
 # NOTE: Modality summary fields are derived from UES `get_snapshot()` outputs.
 # Different modalities have different available fields:
@@ -243,6 +252,7 @@ from datetime import datetime
 
 class EmailSummary(BaseModel):
     """Summary counts for email modality."""
+    message_type: Literal["email_summary"] = "email_summary"
     total_emails: int
     total_threads: int
     unread: int
@@ -250,24 +260,28 @@ class EmailSummary(BaseModel):
 
 class CalendarSummary(BaseModel):
     """Summary counts for calendar modality."""
+    message_type: Literal["calendar_summary"] = "calendar_summary"
     event_count: int
     calendar_count: int
     events_today: int  # Requires get_compact_snapshot(current_time)
 
 class SMSSummary(BaseModel):
     """Summary counts for SMS modality."""
+    message_type: Literal["sms_summary"] = "sms_summary"
     total_messages: int
     total_conversations: int
     unread: int
 
 class ChatSummary(BaseModel):
     """Summary counts for chat modality."""
+    message_type: Literal["chat_summary"] = "chat_summary"
     total_messages: int
     conversation_count: int
     # Note: Chat has no "unread" concept (user-assistant pairs)
 
 class InitialStateSummary(BaseModel):
     """Summary of initial UES state, derived from modality snapshots."""
+    message_type: Literal["initial_state_summary"] = "initial_state_summary"
     email: EmailSummary
     calendar: CalendarSummary
     sms: SMSSummary
@@ -275,6 +289,7 @@ class InitialStateSummary(BaseModel):
 
 class AssessmentStartMessage(BaseModel):
     """Message sent from Green to Purple at assessment start."""
+    message_type: Literal["assessment_start"] = "assessment_start"
     ues_url: str
     api_key: str
     assessment_instructions: str
@@ -283,6 +298,7 @@ class AssessmentStartMessage(BaseModel):
 
 class TurnStartMessage(BaseModel):
     """Message sent from Green to Purple at turn start."""
+    message_type: Literal["turn_start"] = "turn_start"
     turn_number: int
     current_time: datetime
     events_processed: int
@@ -293,6 +309,7 @@ class ActionLogEntry(BaseModel):
     Purple agent reports these in TurnCompleteMessage.
     Green agent adds turn number when aggregating into assessment results.
     """
+    message_type: Literal["action_log_entry"] = "action_log_entry"
     timestamp: datetime
     action: str  # e.g., "email.send", "calendar.create", "sms.reply"
     parameters: dict  # Action-specific parameters
@@ -306,12 +323,14 @@ class TurnCompleteMessage(BaseModel):
     uses this to build the assessment action log directly, rather than
     reconstructing it from UES event history.
     """
+    message_type: Literal["turn_complete"] = "turn_complete"
     actions: list[ActionLogEntry]
     notes: str | None = None  # Optional reasoning/transparency
     time_step: str = "PT1H"  # ISO 8601 duration
 
 class AssessmentCompleteMessage(BaseModel):
     """Message sent from Green to Purple when assessment ends."""
+    message_type: Literal["assessment_complete"] = "assessment_complete"
     reason: Literal[
         "scenario_complete",
         "early_completion",
@@ -321,14 +340,20 @@ class AssessmentCompleteMessage(BaseModel):
 
 class EarlyCompletionMessage(BaseModel):
     """Message sent from Purple to Green to signal early completion."""
+    message_type: Literal["early_completion"] = "early_completion"
     reason: str | None = None
 ```
 
-**Tests**: Serialization/deserialization, validation.
+**Tests**: Serialization/deserialization, validation, message_type field immutability.
 
-### 2.2 Assessment Results (`results.py`)
+### 2.2 Assessment Results (`results.py`) ✅ COMPLETE
 
 Pydantic models for assessment results (artifacts).
+
+> **Design Note**: Like message models, all result models include a `message_type`
+> field with a fixed literal value for consistent parsing. Results also include
+> validation logic to ensure score consistency (e.g., overall score matches sum
+> of dimension scores).
 
 ```python
 class CriterionResult(BaseModel):
@@ -338,6 +363,7 @@ class CriterionResult(BaseModel):
     evaluations, e.g., politeness scores for each email in an "email
     politeness" criterion.
     """
+    message_type: Literal["criterion_result"] = "criterion_result"
     criterion_id: str
     name: str
     dimension: Literal[
@@ -354,16 +380,19 @@ class CriterionResult(BaseModel):
 
 class DimensionScore(BaseModel):
     """Aggregated score for a dimension."""
+    message_type: Literal["dimension_score"] = "dimension_score"
     score: int
     max_score: int
 
 class OverallScore(BaseModel):
     """Overall assessment score."""
+    message_type: Literal["overall_score"] = "overall_score"
     score: int
     max_score: int
 
 class Scores(BaseModel):
     """All scores for an assessment."""
+    message_type: Literal["scores"] = "scores"
     overall: OverallScore
     dimensions: dict[str, DimensionScore]
 
@@ -373,6 +402,7 @@ class ActionLogEntryWithTurn(BaseModel):
     This extends the ActionLogEntry from messages.py with the turn context
     that the Green agent adds when building the assessment results.
     """
+    message_type: Literal["action_log_entry_with_turn"] = "action_log_entry_with_turn"
     turn: int
     timestamp: datetime
     action: str
@@ -382,6 +412,7 @@ class ActionLogEntryWithTurn(BaseModel):
 
 class AssessmentResults(BaseModel):
     """Complete assessment results."""
+    message_type: Literal["assessment_results"] = "assessment_results"
     assessment_id: str
     scenario_id: str
     participant: str
@@ -394,91 +425,187 @@ class AssessmentResults(BaseModel):
     action_log: list[ActionLogEntryWithTurn]
 ```
 
-**Tests**: Score calculation consistency, JSON schema validation.
+**Tests**: Score calculation consistency, JSON schema validation, score validation.
 
-### 2.3 Task Update Helpers (`updates.py`)
+### 2.3 Task Update Helpers (`updates.py`) ✅ COMPLETE
 
-Helpers for emitting AgentBeats-style task updates (logs).
+Pydantic models for structured task updates and a `TaskUpdateEmitter` helper class.
+Task updates are emitted via A2A `TaskStatusUpdateEvent` messages for logging,
+debugging, and observability.
+
+**Update Types - Green Agent:**
+- `AssessmentStartedUpdate`: Assessment has begun
+- `ScenarioLoadedUpdate`: Scenario configuration loaded
+- `TurnStartedUpdate`: New turn has begun
+- `TurnCompletedUpdate`: Turn has completed
+- `ResponsesGeneratedUpdate`: Character responses generated
+- `SimulationAdvancedUpdate`: UES simulation time advanced
+- `EvaluationStartedUpdate`: Evaluation phase has begun
+- `CriterionEvaluatedUpdate`: Single criterion evaluated
+- `AssessmentCompletedUpdate`: Assessment has ended
+- `ErrorOccurredUpdate`: An error occurred
+
+- `ActionObservedUpdate`: Logs a Purple agent action (emitted by Green when
+  processing TurnCompleteMessage)
+
+**Note**: All task updates are emitted by the Green agent. Purple agents do not
+emit updates directly - they report actions via `TurnCompleteMessage`, and the
+Green agent logs each action as an `ActionObservedUpdate`.
 
 ```python
 class TaskUpdateType(str, Enum):
-    """Types of task updates for logging."""
-    ASSESSMENT_STARTED = "log_assessment_started"
-    SCENARIO_LOADED = "log_scenario_loaded"
-    TURN_STARTED = "log_turn_started"
-    TURN_COMPLETED = "log_turn_completed"
-    RESPONSES_GENERATED = "log_responses_generated"
-    SIMULATION_ADVANCED = "log_simulation_advanced"
-    ASSESSMENT_COMPLETE = "log_assessment_complete"
+    """Types of task updates for logging (all emitted by Green agent)."""
+    ASSESSMENT_STARTED = "update_assessment_started"
+    SCENARIO_LOADED = "update_scenario_loaded"
+    TURN_STARTED = "update_turn_started"
+    TURN_COMPLETED = "update_turn_completed"
+    RESPONSES_GENERATED = "update_responses_generated"
+    SIMULATION_ADVANCED = "update_simulation_advanced"
+    EVALUATION_STARTED = "update_evaluation_started"
+    CRITERION_EVALUATED = "update_criterion_evaluated"
+    ASSESSMENT_COMPLETED = "update_assessment_completed"
+    ERROR_OCCURRED = "update_error_occurred"
+    ACTION_OBSERVED = "update_action_observed"
+
+class ActionObservedUpdate(BaseModel):
+    """Update emitted by Green agent when logging a Purple agent action.
+    
+    The Green agent emits this for each ActionLogEntry in a TurnCompleteMessage
+    received from the Purple agent. Captures all details for audit/debugging.
+    """
+    message_type: Literal["update_action_observed"] = "update_action_observed"
+    turn_number: int
+    timestamp: datetime
+    action: str
+    parameters: dict[str, Any]
+    success: bool
+    error_message: str | None = None
+    notes: str | None = None
 
 class TaskUpdateEmitter:
-    """Helper for emitting structured task updates."""
+    """Helper for emitting structured task updates as A2A events.
     
-    def __init__(self, event_queue: EventQueue): ...
+    Used by the Green agent to emit all task updates during assessment.
+    """
     
-    async def emit(
-        self,
-        update_type: TaskUpdateType,
-        message: str,
-        details: dict | None = None,
-    ) -> None: ...
+    def __init__(self, task_id: str, context_id: str): ...
     
-    async def assessment_started(
+    def assessment_started(
         self,
         assessment_id: str,
         scenario_id: str,
-        participant: str,
-        user_prompt: str,
-    ) -> None: ...
+        participant_url: str,
+        start_time: datetime,
+    ) -> TaskStatusUpdateEvent: ...
     
-    async def turn_completed(
+    def turn_completed(
         self,
-        turn: int,
+        turn_number: int,
         actions_taken: int,
-    ) -> None: ...
+        time_advanced: str,
+        early_completion_requested: bool = False,
+    ) -> TaskStatusUpdateEvent: ...
+    
+    def assessment_completed(
+        self,
+        reason: Literal["scenario_complete", "early_completion", "timeout", "error"],
+        total_turns: int,
+        total_actions: int,
+        duration_seconds: float,
+        overall_score: int,
+        max_score: int,
+    ) -> TaskStatusUpdateEvent: ...
+    
+    # Called when processing TurnCompleteMessage from Purple agent
+    def action_observed(
+        self,
+        turn_number: int,
+        timestamp: datetime,
+        action: str,
+        parameters: dict[str, Any],
+        success: bool,
+        error_message: str | None = None,
+        notes: str | None = None,
+    ) -> TaskStatusUpdateEvent: ...
     
     # ... more convenience methods
+
+def parse_update(data: dict[str, Any]) -> AgentBeatsUpdate: ...
 ```
 
-**Tests**: Update format validation, async behavior.
+**Tests**: 60 tests covering all update models, serialization, validation, parsing,
+and emitter methods.
 
-### 2.4 Configuration (`config.py`)
+### 2.4 Configuration (`config.py`) ✅ COMPLETE
+
+**Status**: Implemented and tested (83 tests passing). Provides comprehensive
+configuration management for Green and Purple agents with CLI argument parsing
+and environment variable support.
+
+**Key Features**:
+- Base `AgentBeatsConfig` with common settings (host, port, card_url, log_level)
+- `GreenAgentConfig` with evaluator-specific settings (UES URL, scenarios, LLM models)
+- `PurpleAgentConfig` with participant-specific settings (model, temperature, actions)
+- `from_cli_args()` class method for CLI argument parsing
+- Environment variable loading via pydantic-settings (prefixed with `AGENTBEATS_`)
+- `merge_configs()` utility for non-destructive config updates
+- `validate_config()` for detecting potential issues
+
+**Environment Variable Prefixes**:
+- Base config: `AGENTBEATS_*`
+- Green config: `AGENTBEATS_GREEN_*`
+- Purple config: `AGENTBEATS_PURPLE_*`
 
 Shared configuration patterns.
 
 ```python
-class AgentBeatsConfig(BaseModel):
+from pydantic_settings import BaseSettings
+
+class AgentBeatsConfig(BaseSettings):
     """Base configuration for AgentBeats agents."""
     host: str = "0.0.0.0"
     port: int = 8000
-    card_url: str | None = None  # For Dockerized agents
+    card_url: str | None = None
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     
     @classmethod
-    def from_cli_args(cls) -> Self:
+    def from_cli_args(cls, args: Sequence[str] | None = None) -> Self:
         """Parse from command line arguments."""
+        ...
+    
+    @property
+    def effective_card_url(self) -> str:
+        """Get card URL with sensible default."""
         ...
 
 class GreenAgentConfig(AgentBeatsConfig):
     """Configuration specific to Green agents."""
-    ues_url: str = "http://localhost:8080"
-    proctor_api_key: str | None = None
-    
-    # LLM configuration
-    judging_model: str = "gpt-4o"
-    response_model: str = "gpt-4o-mini"
-    
-    # Assessment defaults
-    default_turn_timeout: int = 300  # seconds
-    default_time_step: str = "PT1H"
+    port: int = 8000  # Default for Green
     verbose_updates: bool = True
+    ues_url: str = "http://localhost:8080"
+    ues_proctor_api_key: SecretStr | None = None
+    scenarios_dir: str = "scenarios"
+    default_max_turns: int = 100
+    default_turn_timeout: float = 300.0
+    response_generator_model: str = "gpt-4o"
+    evaluation_model: str = "gpt-4o"
 
 class PurpleAgentConfig(AgentBeatsConfig):
     """Configuration specific to Purple agents."""
-    # Model to use for reasoning
+    port: int = 8001  # Default for Purple
     model: str = "gpt-4o"
+    max_actions_per_turn: int = 50
+    temperature: float = 0.7
+    enable_reflection: bool = True
+    action_delay: float = 0.0
+
+# Utility functions
+def merge_configs(base: AgentBeatsConfig, overrides: dict) -> AgentBeatsConfig: ...
+def validate_config(config: AgentBeatsConfig) -> list[str]: ...  # Returns warnings
 ```
 
-**Tests**: CLI argument parsing, environment variable loading.
+**Tests**: 83 tests covering CLI argument parsing, environment variable loading,
+field validation, configuration merging, and validation warnings.
 
 ---
 
@@ -1430,10 +1557,11 @@ ues-agentbeats/
 - [x] Write tests for A2A helpers
 - [x] Validate with simple A2A server test
 
-### Week 1: AgentBeats Common (Days 4-5)
-- [ ] Implement `src/common/agentbeats/` module
-- [ ] Define message types and results schema
-- [ ] Write tests for serialization/validation
+### Week 1: AgentBeats Common (Days 4-5) ✅ COMPLETE
+- [x] Implement `src/common/agentbeats/` module
+- [x] Define message types and results schema
+- [x] Write tests for serialization/validation
+- [x] Implement configuration module with CLI/env support
 
 ### Week 2: Green Agent Core (Days 6-10)
 - [ ] Implement scenario schema and loader
