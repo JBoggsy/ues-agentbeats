@@ -16,7 +16,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from pydantic import ValidationError, SecretStr
+from pydantic import ValidationError
 
 from src.common.agentbeats.config import (
     AgentBeatsConfig,
@@ -259,8 +259,7 @@ class TestGreenAgentConfig:
 
         assert config.port == 8000
         assert config.verbose_updates is True
-        assert config.ues_url == "http://localhost:8080"
-        assert config.ues_proctor_api_key is None
+        assert config.ues_base_port == 8080
         assert config.scenarios_dir == "scenarios"
         assert config.default_max_turns == 100
         assert config.default_turn_timeout == 300.0
@@ -271,8 +270,7 @@ class TestGreenAgentConfig:
         """Test that explicit values are used."""
         config = GreenAgentConfig(
             verbose_updates=False,
-            ues_url="http://ues.example.com:9090",
-            ues_proctor_api_key=SecretStr("secret-key"),
+            ues_base_port=9090,
             scenarios_dir="/custom/scenarios",
             default_max_turns=50,
             default_turn_timeout=120.0,
@@ -281,9 +279,7 @@ class TestGreenAgentConfig:
         )
 
         assert config.verbose_updates is False
-        assert config.ues_url == "http://ues.example.com:9090"
-        assert config.ues_proctor_api_key is not None
-        assert config.ues_proctor_api_key.get_secret_value() == "secret-key"
+        assert config.ues_base_port == 9090
         assert config.scenarios_dir == "/custom/scenarios"
         assert config.default_max_turns == 50
         assert config.default_turn_timeout == 120.0
@@ -324,12 +320,12 @@ class TestGreenAgentConfigCLI:
         config = GreenAgentConfig.from_cli_args(["--no-verbose-updates"])
         assert config.verbose_updates is False
 
-    def test_from_cli_args_ues_url(self, clean_env: None) -> None:
-        """Test CLI parsing of --ues-url argument."""
+    def test_from_cli_args_ues_base_port(self, clean_env: None) -> None:
+        """Test CLI parsing of --ues-base-port argument."""
         config = GreenAgentConfig.from_cli_args(
-            ["--ues-url", "http://ues.example.com:9090"]
+            ["--ues-base-port", "9090"]
         )
-        assert config.ues_url == "http://ues.example.com:9090"
+        assert config.ues_base_port == 9090
 
     def test_from_cli_args_scenarios_dir(self, clean_env: None) -> None:
         """Test CLI parsing of --scenarios-dir argument."""
@@ -369,8 +365,8 @@ class TestGreenAgentConfigCLI:
                 "localhost",
                 "--port",
                 "9000",
-                "--ues-url",
-                "http://ues:8080",
+                "--ues-base-port",
+                "8888",
                 "--no-verbose-updates",
                 "--default-max-turns",
                 "25",
@@ -379,7 +375,7 @@ class TestGreenAgentConfigCLI:
 
         assert config.host == "localhost"
         assert config.port == 9000
-        assert config.ues_url == "http://ues:8080"
+        assert config.ues_base_port == 8888
         assert config.verbose_updates is False
         assert config.default_max_turns == 25
 
@@ -393,18 +389,11 @@ class TestGreenAgentConfigEnv:
         config = GreenAgentConfig()
         assert config.verbose_updates is False
 
-    def test_env_ues_url(self, clean_env: None) -> None:
-        """Test environment variable for ues_url."""
-        os.environ["AGENTBEATS_GREEN_UES_URL"] = "http://env-ues:9090"
+    def test_env_ues_base_port(self, clean_env: None) -> None:
+        """Test environment variable for ues_base_port."""
+        os.environ["AGENTBEATS_GREEN_UES_BASE_PORT"] = "9090"
         config = GreenAgentConfig()
-        assert config.ues_url == "http://env-ues:9090"
-
-    def test_env_ues_proctor_api_key(self, clean_env: None) -> None:
-        """Test environment variable for ues_proctor_api_key."""
-        os.environ["AGENTBEATS_GREEN_UES_PROCTOR_API_KEY"] = "env-secret-key"
-        config = GreenAgentConfig()
-        assert config.ues_proctor_api_key is not None
-        assert config.ues_proctor_api_key.get_secret_value() == "env-secret-key"
+        assert config.ues_base_port == 9090
 
     def test_env_scenarios_dir(self, clean_env: None) -> None:
         """Test environment variable for scenarios_dir."""
@@ -660,18 +649,6 @@ class TestValidateConfig:
         warnings = validate_config(config)
         assert any("timeout" in w.lower() and "short" in w.lower() for w in warnings)
 
-    def test_green_no_api_key_warning(self, clean_env: None) -> None:
-        """Test warning for missing UES proctor API key."""
-        config = GreenAgentConfig()
-        warnings = validate_config(config)
-        assert any("api key" in w.lower() for w in warnings)
-
-    def test_green_with_api_key_no_warning(self, clean_env: None) -> None:
-        """Test no API key warning when key is provided."""
-        config = GreenAgentConfig(ues_proctor_api_key=SecretStr("secret"))
-        warnings = validate_config(config)
-        assert not any("api key" in w.lower() for w in warnings)
-
     def test_purple_high_temperature_warning(self, clean_env: None) -> None:
         """Test warning for high temperature."""
         config = PurpleAgentConfig(temperature=1.8)
@@ -689,10 +666,9 @@ class TestValidateConfig:
         config = GreenAgentConfig(
             port=80,  # Privileged port
             default_turn_timeout=5.0,  # Very short timeout
-            # No API key (default None)
         )
         warnings = validate_config(config)
-        assert len(warnings) >= 3
+        assert len(warnings) >= 2
 
 
 # =============================================================================
@@ -732,12 +708,6 @@ class TestEdgeCases:
             config = AgentBeatsConfig.from_cli_args(None)
             assert config.host == "0.0.0.0"
 
-    def test_secret_str_not_exposed_in_repr(self, clean_env: None) -> None:
-        """Test that SecretStr values are not exposed in repr."""
-        config = GreenAgentConfig(ues_proctor_api_key=SecretStr("super-secret"))
-        repr_str = repr(config)
-        assert "super-secret" not in repr_str
-
     def test_config_immutability(self, clean_env: None) -> None:
         """Test that config values cannot be changed after creation."""
         # Note: pydantic-settings models are mutable by default
@@ -758,15 +728,6 @@ class TestEdgeCases:
         assert data["host"] == "localhost"
         assert data["port"] == 9000
         assert data["verbose_updates"] is False
-
-    def test_config_model_dump_excludes_secrets(self, clean_env: None) -> None:
-        """Test that model_dump handles SecretStr correctly."""
-        config = GreenAgentConfig(ues_proctor_api_key=SecretStr("secret"))
-        data = config.model_dump()
-
-        # SecretStr is dumped as SecretStr object, not the value
-        assert isinstance(data["ues_proctor_api_key"], SecretStr)
-
 
 # =============================================================================
 # Integration Tests
@@ -793,8 +754,7 @@ class TestConfigIntegration:
 
     def test_full_green_config_loading(self, clean_env: None) -> None:
         """Test complete Green agent configuration loading."""
-        os.environ["AGENTBEATS_GREEN_UES_URL"] = "http://env-ues:8080"
-        os.environ["AGENTBEATS_GREEN_UES_PROCTOR_API_KEY"] = "env-key"
+        os.environ["AGENTBEATS_GREEN_UES_BASE_PORT"] = "9090"
 
         config = GreenAgentConfig.from_cli_args(
             [
@@ -815,9 +775,7 @@ class TestConfigIntegration:
         assert config.scenarios_dir == "/scenarios"
 
         # Environment values
-        assert config.ues_url == "http://env-ues:8080"
-        assert config.ues_proctor_api_key is not None
-        assert config.ues_proctor_api_key.get_secret_value() == "env-key"
+        assert config.ues_base_port == 9090
 
     def test_full_purple_config_loading(self, clean_env: None) -> None:
         """Test complete Purple agent configuration loading."""

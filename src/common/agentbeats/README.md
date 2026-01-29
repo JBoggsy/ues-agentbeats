@@ -62,8 +62,8 @@ initial_state = InitialStateSummary(
 )
 
 start_msg = AssessmentStartMessage(
-    ues_url="http://localhost:8080",
-    api_key="secret-key",
+    ues_url="http://localhost:8100",  # Provided by GreenAgent
+    api_key="user-level-token-...",    # Generated per-assessment
     assessment_instructions="Triage all unread emails by priority.",
     current_time=datetime.now(tz=timezone.utc),
     initial_state_summary=initial_state,
@@ -222,12 +222,12 @@ print(purple_config.port)  # 8001
 # From CLI arguments
 green_config = GreenAgentConfig.from_cli_args([
     "--port", "9000",
-    "--ues-url", "http://ues:8080",
+    "--ues-base-port", "8200",
     "--verbose-updates",
 ])
 
 # From environment variables
-# Set AGENTBEATS_GREEN_UES_URL=http://ues:8080
+# Set AGENTBEATS_GREEN_UES_BASE_PORT=8200
 # Set AGENTBEATS_PURPLE_MODEL=gpt-4-turbo
 green_config = GreenAgentConfig()  # Reads from environment
 purple_config = PurpleAgentConfig()
@@ -368,8 +368,7 @@ result = parse_result(result_data)
 **GreenAgentConfig Fields** (extends AgentBeatsConfig):
 - `port` - Server port (default: 8000)
 - `verbose_updates` - Emit detailed task updates (default: True)
-- `ues_url` - UES instance URL (default: "http://localhost:8080")
-- `ues_proctor_api_key` - API key for proctor-level UES access
+- `ues_base_port` - Base port for UES servers; each GreenAgent gets a unique port (default: 8100)
 - `scenarios_dir` - Directory containing scenarios (default: "scenarios")
 - `default_max_turns` - Default max turns (default: 100)
 - `default_turn_timeout` - Default turn timeout in seconds (default: 300.0)

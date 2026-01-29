@@ -56,7 +56,7 @@ from __future__ import annotations
 import argparse
 from typing import Any, Literal, Self, Sequence
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -241,14 +241,19 @@ class GreenAgentConfig(AgentBeatsConfig):
     evaluate Purple agent performance. This config extends the base config
     with Green-specific settings.
 
+    Note:
+        Each GreenAgent instance spins up its own UES server on a unique port.
+        The ues_base_port is the starting port for allocation; the executor
+        assigns successive ports (ues_base_port, ues_base_port+1, ...) to
+        each new GreenAgent instance.
+
     Attributes:
         port: Server port (defaults to 8000 for Green agents).
         verbose_updates: Whether to emit detailed task updates during
             assessment. When True, emits updates for each turn, action,
             and criterion evaluation. When False, only emits start/end updates.
-        ues_url: URL of the UES instance to use for assessments.
-        ues_proctor_api_key: API key for proctor-level UES access. Stored
-            as SecretStr to prevent accidental logging.
+        ues_base_port: Base port for UES server allocation. Each GreenAgent
+            gets a unique port starting from this value.
         scenarios_dir: Directory containing scenario definitions.
         default_max_turns: Default maximum turns if not specified in scenario.
         default_turn_timeout: Default timeout per turn in seconds.
@@ -264,8 +269,7 @@ class GreenAgentConfig(AgentBeatsConfig):
 
     Environment Variables:
         AGENTBEATS_GREEN_VERBOSE_UPDATES: Enable/disable verbose updates
-        AGENTBEATS_GREEN_UES_URL: UES instance URL
-        AGENTBEATS_GREEN_UES_PROCTOR_API_KEY: UES proctor API key
+        AGENTBEATS_GREEN_UES_BASE_PORT: Base port for UES servers
         AGENTBEATS_GREEN_SCENARIOS_DIR: Scenarios directory path
         AGENTBEATS_GREEN_RESPONSE_GENERATOR_MODEL: LLM for responses
         AGENTBEATS_GREEN_EVALUATION_MODEL: LLM for evaluation
@@ -291,13 +295,11 @@ class GreenAgentConfig(AgentBeatsConfig):
         default=True,
         description="Whether to emit detailed task updates during assessment",
     )
-    ues_url: str = Field(
-        default="http://localhost:8080",
-        description="URL of the UES instance to use for assessments",
-    )
-    ues_proctor_api_key: SecretStr | None = Field(
-        default=None,
-        description="API key for proctor-level UES access",
+    ues_base_port: int = Field(
+        default=8080,
+        ge=1,
+        le=65535,
+        description="Base port for UES server allocation (each GreenAgent gets unique port)",
     )
     scenarios_dir: str = Field(
         default="scenarios",
@@ -342,11 +344,11 @@ class GreenAgentConfig(AgentBeatsConfig):
             help="Only emit start/end updates",
         )
         parser.add_argument(
-            "--ues-url",
-            type=str,
+            "--ues-base-port",
+            type=int,
             default=None,
-            dest="ues_url",
-            help="URL of the UES instance",
+            dest="ues_base_port",
+            help="Base port for UES server allocation",
         )
         parser.add_argument(
             "--scenarios-dir",
@@ -392,7 +394,7 @@ class GreenAgentConfig(AgentBeatsConfig):
         base.update(
             {
                 "verbose_updates": parsed.verbose_updates,
-                "ues_url": parsed.ues_url,
+                "ues_base_port": parsed.ues_base_port,
                 "scenarios_dir": parsed.scenarios_dir,
                 "default_max_turns": parsed.default_max_turns,
                 "default_turn_timeout": parsed.default_turn_timeout,
@@ -611,11 +613,6 @@ def validate_config(config: AgentBeatsConfig) -> list[str]:
             warnings.append(
                 f"Turn timeout of {config.default_turn_timeout}s is very short "
                 "and may cause issues with slower LLM responses"
-            )
-        if config.ues_proctor_api_key is None:
-            warnings.append(
-                "No UES proctor API key configured. Assessment will fail "
-                "without proctor-level access."
             )
 
     if isinstance(config, PurpleAgentConfig):
