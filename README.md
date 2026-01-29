@@ -1,6 +1,6 @@
 # UES AgentBeats
 
-A submission to the **AgentX AgentBeats Competition** building on the [User Environment Simulator (UES)](https://github.com/your-org/ues) project.
+A submission to the **AgentX AgentBeats Competition** building on the [User Environment Simulator (UES)](https://github.com/JBoggsy/ues) project.
 
 ## Overview
 

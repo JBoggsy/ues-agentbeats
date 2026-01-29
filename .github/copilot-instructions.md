@@ -127,6 +127,13 @@ The competition requires Docker images for reproducible assessments:
 - Avoid hallucinations—refer to existing code, UES docs, or A2A protocol specs when unsure
 - Update relevant documentation after implementing features
 
+## User Interaction Instructions
+- Always be curious: ask clarifying questions if user intent is unclear
+- Be a critical thinker: don't assume the user is always right, consider the user's suggestions/designs/approach carefully and identify weaknesses
+- Don't be a yes-man: provide honest feedback and alternative suggestions, don't just agree with everything the user says
+- If you see something, say something: point out potential issues, bugs, or improvements you notice in the user's code or design
+- Think globally, act locally: consider the broader context of the project when making decisions, but focus on delivering high-quality code for the specific task at hand
+
 ## Key External Resources
 
 - **A2A Protocol**: https://a2a-protocol.org/latest/

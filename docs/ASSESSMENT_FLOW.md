@@ -141,8 +141,8 @@ This document details the A2A protocol interaction flow for the UES Green Agent 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  Green → Purple (A2A): assessment_start                                      │
 │  {                                                                           │
-│    ues_url: "http://ues:8000",                                              │
-│    api_key: "user-level-token-...",                                         │
+│    ues_url: "http://localhost:8100",  // Generated per-GreenAgent           │
+│    api_key: "user-level-token-...",   // Generated per-assessment           │
 │    assessment_instructions: "You are a personal assistant AI being          │
 │      evaluated... Query the chat state (GET /chat/state) to find the        │
 │      most recent message from the user and follow the instructions...",     │
@@ -216,7 +216,7 @@ This document details the A2A protocol interaction flow for the UES Green Agent 
 **AssessmentStart**
 ```json
 {                                                                        
-  "ues_url": "http://ues:8000",                                            
+  "ues_url": "http://localhost:8100",
   "api_key": "user-level-token-...",                                       
   "assessment_instructions": "You are a personal assistant AI being evaluated on your ability to help a user. Your instructions for this assessment have been provided by the user via the chat modality. Query the chat state (GET /chat/state) to find the most recent message from the user and follow the instructions provided there. The message will contain your goals, constraints, and any other relevant context for this assessment.",
   "current_time": "2026-01-22T09:00:00Z",                                  
