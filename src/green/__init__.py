@@ -5,19 +5,16 @@ Purple agents' performance. This package provides:
 
 - Scenario management (loading, validation, configuration)
 - Assessment orchestration (turn-based execution loop)
-- Action log building (tracking Purple agent actions)
+- Core infrastructure (LLM factory, action logging, message collection)
 - Response generation (character simulation)
 - Criteria evaluation (judging, scoring)
-- LLM configuration (model factory)
-- Message collection (new message tracking)
 
-Modules:
+Subpackages:
+    core: Infrastructure shared across components (LLM, action log, message collector)
+    response: Character response generation system
+    evaluation: Criteria evaluation and scoring
     scenarios: Scenario schema and loading utilities
-    action_log: Action log building for assessments
-    message_collector: New message collection from UES
-    response_generator: Character response generation
-    judge: Criteria evaluation and scoring
-    llm_config: LLM factory for model instantiation
+    assessment: Assessment orchestration (in progress)
 
 Example:
     >>> from pathlib import Path
@@ -26,22 +23,20 @@ Example:
     >>> config = manager.load_scenario("email_triage_basic")
 """
 
-from src.green.action_log import (
+from src.green.core import (
     ActionLogBuilder,
     ActionLogBuilderError,
     InvalidTurnNumberError,
     InvalidTurnStateError,
-)
-from src.green.judge import (
-    CriteriaJudge,
-    CriteriaJudgeError,
-    EvaluationError,
-)
-from src.green.llm_config import (
     LLMConfig,
     LLMFactory,
     LLMProvider,
     UnsupportedModelError,
+)
+from src.green.evaluation import (
+    CriteriaJudge,
+    CriteriaJudgeError,
+    EvaluationError,
 )
 from src.green.scenarios import (
     CharacterProfile,
@@ -55,20 +50,19 @@ from src.green.scenarios import (
 )
 
 __all__ = [
-    # Action log builder
+    # Core infrastructure
     "ActionLogBuilder",
     "ActionLogBuilderError",
     "InvalidTurnNumberError",
     "InvalidTurnStateError",
-    # Criteria judge
-    "CriteriaJudge",
-    "CriteriaJudgeError",
-    "EvaluationError",
-    # LLM configuration
     "LLMConfig",
     "LLMFactory",
     "LLMProvider",
     "UnsupportedModelError",
+    # Criteria evaluation
+    "CriteriaJudge",
+    "CriteriaJudgeError",
+    "EvaluationError",
     # Scenario schema models
     "ResponseTiming",
     "CharacterProfile",

@@ -827,7 +827,9 @@ evaluators = manager.get_evaluators("email_triage_basic")
 
 **Tests**: 141 tests covering schema validation, loading from JSON files, evaluator loading, error handling, caching, and validation warnings.
 
-### 3.3 LLM Configuration (`llm_config.py`) ✅ COMPLETE
+### 3.3 LLM Configuration (`core/llm_config.py`) ✅ COMPLETE
+
+**Location**: `src/green/core/llm_config.py`
 
 **Status**: Implemented and tested (72 tests passing). Factory for creating LangChain
 LLM instances supporting multiple providers.
@@ -898,7 +900,9 @@ class LLMFactory:
 **Tests**: 72 tests covering provider detection, model creation, parameter passing,
 reasoning model handling, error cases, and edge cases.
 
-### 3.4 Action Log Builder (`action_log.py`) ✅ COMPLETE
+### 3.4 Action Log Builder (`core/action_log.py`) ✅ COMPLETE
+
+**Location**: `src/green/core/action_log.py`
 
 **Status**: Implemented and tested (67 tests passing).
 
@@ -986,7 +990,9 @@ class ActionLogBuilder:
 **Tests**: 67 tests covering initial state, turn management, action logging,
 statistics, filtering, reset functionality, exception handling, and edge cases.
 
-### 3.5 New Message Collector (`message_collector.py`) ✅ COMPLETE
+### 3.5 New Message Collector (`core/message_collector.py`) ✅ COMPLETE
+
+**Location**: `src/green/core/message_collector.py`
 
 **Status**: Implemented and tested (41 tests passing).
 
@@ -1054,15 +1060,17 @@ class NewMessageCollector:
 **Tests**: 41 tests covering initialization, collection, reset, edge cases, and
 exception handling.
 
-### 3.6 Response Generation (`response_generator.py`) ✅ COMPLETE
+### 3.6 Response Generation (`response/`) ✅ COMPLETE
 
-**Status**: Implemented and tested (54 tests for ResponseGenerator, plus 40 tests for response_models.py and 29 tests for prompts, totaling 123 response-related tests).
+**Location**: `src/green/response/`
+
+**Status**: Implemented and tested (54 tests for generator, plus 40 tests for models and 29 tests for prompts, totaling 123 response-related tests).
 
 **Implementation Details**:
 - See `docs/design/RESPONSE_GENERATION_DESIGN.md` for comprehensive design documentation
-- `src/green/response_models.py` - Data models including `ScheduledResponse`, `ShouldRespondResult`, `CalendarRSVPResult`, `ThreadContext`, `MessageContext`, `CalendarEventContext`
-- `src/green/prompts/response_prompts.py` - LLM prompt templates for response generation decisions
-- `src/green/response_generator.py` - Main `ResponseGenerator` class (~1200 lines)
+- `src/green/response/models.py` - Data models including `ScheduledResponse`, `ShouldRespondResult`, `CalendarRSVPResult`, `ThreadContext`, `MessageContext`, `CalendarEventContext`
+- `src/green/response/prompts.py` - LLM prompt templates for response generation decisions
+- `src/green/response/generator.py` - Main `ResponseGenerator` class (~1200 lines)
 
 The `ResponseGenerator` creates in-character responses from simulated contacts
 based on new messages collected during the assessment. Depends on `LLMFactory` (3.3)
@@ -1083,7 +1091,7 @@ and `NewMessageCollector` (3.5).
 from ues.client._email import Email
 from ues.client._sms import SMSMessage
 from ues.client._calendar import CalendarEvent
-from src.green.message_collector import NewMessages
+from src.green.core.message_collector import NewMessages
 
 class ScheduledResponse(BaseModel):
     """A response to be scheduled in UES."""
@@ -1506,7 +1514,9 @@ class ResponseGenerator:
         ...
 ```
 
-### 3.7 Criteria Judge (`judge.py`) ✅ COMPLETE
+### 3.7 Criteria Judge (`evaluation/`) ✅ COMPLETE
+
+**Location**: `src/green/evaluation/`
 
 The `CriteriaJudge` evaluates Purple agent performance against scenario criteria.
 Depends on `LLMFactory` (3.3).
@@ -1518,8 +1528,8 @@ Depends on `LLMFactory` (3.3).
 4. Aggregate scores by dimension
 
 ```python
-from src.green.judge import CriteriaJudge
-from src.green.llm_config import LLMFactory
+from src.green.evaluation import CriteriaJudge
+from src.green.core import LLMFactory
 from src.common.agentbeats.updates import TaskUpdateEmitter
 
 # Create judge with scenario criteria and evaluators
@@ -1550,8 +1560,8 @@ dimensions = judge.get_dimensions()
 - **Float scores**: Uses `float` for scores throughout to handle scaling accurately
 
 **Supporting Modules:**
-- `judge_models.py`: `LLMEvaluationResult` Pydantic model for structured LLM output
-- `prompts/evaluation_prompts.py`: Prompt templates and context builders for LLM evaluation
+- `evaluation/models.py`: `LLMEvaluationResult` Pydantic model for structured LLM output
+- `evaluation/prompts.py`: Prompt templates and context builders for LLM evaluation
 
 ### 3.8 Green Agent (`agent.py`)
 
@@ -2578,25 +2588,32 @@ ues-agentbeats/
 │   │
 │   ├── green/
 │   │   ├── __init__.py
+│   │   ├── README.md
 │   │   ├── __main__.py            # Entry point
 │   │   ├── executor.py            # A2A executor
-│   │   ├── llm_config.py          # LLM configuration
-│   │   ├── scenarios/
+│   │   ├── core/                  # Core infrastructure (Phase 3.3-3.5)
+│   │   │   ├── __init__.py
+│   │   │   ├── llm_config.py      # LLM factory
+│   │   │   ├── action_log.py      # Action log builder
+│   │   │   └── message_collector.py  # New message collector
+│   │   ├── response/              # Response generation (Phase 3.6)
+│   │   │   ├── __init__.py
+│   │   │   ├── generator.py       # ResponseGenerator class
+│   │   │   ├── models.py          # Response data models
+│   │   │   └── prompts.py         # Response prompt templates
+│   │   ├── evaluation/            # Criteria evaluation (Phase 3.7)
+│   │   │   ├── __init__.py
+│   │   │   ├── judge.py           # CriteriaJudge class
+│   │   │   ├── models.py          # LLMEvaluationResult model
+│   │   │   └── prompts.py         # Evaluation prompt templates
+│   │   ├── scenarios/             # Scenario management (Phase 3.2)
 │   │   │   ├── __init__.py
 │   │   │   ├── schema.py          # Scenario schema
 │   │   │   └── loader.py          # Scenario loader
-│   │   ├── assessment/
-│   │   │   ├── __init__.py
-│   │   │   ├── orchestrator.py    # Assessment orchestrator
-│   │   │   └── turn_handler.py    # Turn handling
-│   │   ├── response_generator/
-│   │   │   ├── __init__.py
-│   │   │   ├── generator.py       # Response generation
-│   │   │   └── context.py         # Response context
-│   │   └── evaluation/
-│   │       ├── __init__.py
-│   │       ├── judge.py           # Criteria judge
-│   │       └── action_log.py      # Action log builder
+│   │   ├── assessment/            # Assessment orchestration (Phase 3.8)
+│   │   │   └── ...
+│   │   └── prompts/               # Re-exports (deprecated)
+│   │       └── __init__.py
 │   │
 │   └── purple/
 │       ├── __init__.py
@@ -2620,6 +2637,10 @@ ues-agentbeats/
 │   │   ├── a2a/
 │   │   └── agentbeats/
 │   ├── green/
+│   │   ├── core/                  # Tests for core infrastructure
+│   │   ├── response/              # Tests for response generation
+│   │   ├── evaluation/            # Tests for criteria evaluation
+│   │   └── scenarios/             # Tests for scenario management
 │   └── purple/
 │
 ├── docs/

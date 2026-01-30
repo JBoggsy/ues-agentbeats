@@ -43,8 +43,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.common.agentbeats.updates import TaskUpdateEmitter
-from src.green.message_collector import NewMessages
-from src.green.prompts.response_prompts import (
+from src.green.core.message_collector import NewMessages
+from src.green.response.prompts import (
     CALENDAR_RSVP_SYSTEM_PROMPT,
     CALENDAR_RSVP_USER_PROMPT,
     GENERATE_RESPONSE_SYSTEM_PROMPT,
@@ -57,7 +57,7 @@ from src.green.prompts.response_prompts import (
     build_thread_summary_section,
     format_participant_list,
 )
-from src.green.response_models import (
+from src.green.response.models import (
     CalendarEventContext,
     CalendarRSVPResult,
     MessageContext,

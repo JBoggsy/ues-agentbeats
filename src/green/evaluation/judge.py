@@ -50,8 +50,8 @@ from src.common.agentbeats.results import (
     ScoringDimension,
 )
 from src.common.agentbeats.updates import TaskUpdateEmitter
-from src.green.judge_models import LLMEvaluationResult
-from src.green.prompts.evaluation_prompts import (
+from src.green.evaluation.models import LLMEvaluationResult
+from src.green.evaluation.prompts import (
     LLM_EVALUATION_SYSTEM_PROMPT,
     LLM_EVALUATION_USER_TEMPLATE,
     build_evaluation_context_section,

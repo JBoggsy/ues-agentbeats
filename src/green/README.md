@@ -17,23 +17,31 @@ The Green Agent:
 ```
 src/green/
 ├── __init__.py
+├── README.md
+├── core/                   # Core infrastructure (✅ complete)
+│   ├── __init__.py
+│   ├── llm_config.py      # LLM factory for multiple providers
+│   ├── action_log.py      # Action log builder
+│   └── message_collector.py # New message collector
+├── response/               # Response generation (✅ complete)
+│   ├── __init__.py
+│   ├── generator.py       # Main ResponseGenerator class
+│   ├── models.py          # Data models (ScheduledResponse, etc.)
+│   └── prompts.py         # LLM prompt templates
+├── evaluation/             # Criteria evaluation (✅ complete)
+│   ├── __init__.py
+│   ├── judge.py           # Main CriteriaJudge class
+│   ├── models.py          # LLMEvaluationResult model
+│   └── prompts.py         # Evaluation prompt templates
 ├── scenarios/              # Scenario schema and loader (✅ complete)
+│   ├── __init__.py
 │   ├── schema.py          # Pydantic models for scenarios
 │   ├── loader.py          # Scenario discovery and loading
 │   └── README.md          # Scenario module documentation
-├── prompts/                # LLM prompt templates (✅ complete)
-│   ├── __init__.py
-│   ├── response_prompts.py # Templates for response generation
-│   └── evaluation_prompts.py # Templates for criterion evaluation
-├── assessment/             # Assessment orchestration (🚧 in progress)
-│   └── ...
-├── action_log.py           # Action log builder (✅ complete)
-├── judge.py                # Criteria evaluation judge (✅ complete)
-├── judge_models.py         # LLM evaluation result models (✅ complete)
-├── llm_config.py           # LLM factory for multiple providers (✅ complete)
-├── message_collector.py    # New message collector (✅ complete)
-├── response_models.py      # Response data models (✅ complete)
-└── response_generator.py   # Character response generation (✅ complete)
+├── prompts/                # Re-exports (deprecated, for backwards compat)
+│   └── __init__.py
+└── assessment/             # Assessment orchestration (🚧 in progress)
+    └── ...
 ```
 
 ## Key Components
@@ -43,14 +51,14 @@ src/green/
 The response generation system creates in-character responses from simulated contacts during assessments. It transforms UES from a static simulation into a dynamic, interactive environment.
 
 **Files:**
-- `response_generator.py` - Main `ResponseGenerator` class
-- `response_models.py` - Data models (`ScheduledResponse`, `ShouldRespondResult`, etc.)
-- `prompts/response_prompts.py` - LLM prompt templates
+- `response/generator.py` - Main `ResponseGenerator` class
+- `response/models.py` - Data models (`ScheduledResponse`, `ShouldRespondResult`, etc.)
+- `response/prompts.py` - LLM prompt templates
 
 **Usage:**
 ```python
-from src.green.response_generator import ResponseGenerator
-from src.green.llm_config import LLMFactory
+from src.green.response import ResponseGenerator
+from src.green.core import LLMFactory
 
 # Create LLMs
 response_llm = LLMFactory.create("gpt-4o-mini")
@@ -76,14 +84,14 @@ responses = await generator.process_new_messages(
 The `CriteriaJudge` evaluates Purple agent performance against scenario-defined criteria. It supports both programmatic evaluators (Python functions) and LLM-based evaluation.
 
 **Files:**
-- `judge.py` - Main `CriteriaJudge` class
-- `judge_models.py` - `LLMEvaluationResult` model for structured LLM output
-- `prompts/evaluation_prompts.py` - Prompt templates for LLM evaluation
+- `evaluation/judge.py` - Main `CriteriaJudge` class
+- `evaluation/models.py` - `LLMEvaluationResult` model for structured LLM output
+- `evaluation/prompts.py` - Prompt templates for LLM evaluation
 
 **Usage:**
 ```python
-from src.green.judge import CriteriaJudge
-from src.green.llm_config import LLMFactory
+from src.green.evaluation import CriteriaJudge
+from src.green.core import LLMFactory
 
 # Create judge with scenario criteria
 judge = CriteriaJudge(
@@ -116,7 +124,7 @@ The `LLMFactory` creates LangChain chat model instances for multiple providers:
 - **Ollama**: `ollama/llama3.2`, `ollama/gemma3:12b`, etc.
 
 ```python
-from src.green.llm_config import LLMFactory
+from src.green.core import LLMFactory
 
 # Create different LLM instances
 openai_llm = LLMFactory.create("gpt-4o-mini", temperature=0.7)
@@ -133,7 +141,7 @@ See [scenarios/README.md](scenarios/README.md) for detailed documentation on sce
 The `NewMessageCollector` tracks and collects new messages from UES modalities:
 
 ```python
-from src.green.message_collector import NewMessageCollector
+from src.green.core import NewMessageCollector
 
 collector = NewMessageCollector(ues_client)
 await collector.initialize()  # Record initial state
@@ -148,7 +156,7 @@ new_messages = await collector.collect()
 The `ActionLogBuilder` creates action log entries from UES event history:
 
 ```python
-from src.green.action_log import ActionLogBuilder
+from src.green.core import ActionLogBuilder
 
 builder = ActionLogBuilder()
 entries = builder.build_from_events(

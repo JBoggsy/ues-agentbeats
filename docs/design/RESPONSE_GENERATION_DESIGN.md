@@ -6,9 +6,9 @@ This document provides the complete implementation design for Phase 3.6: Respons
 **Status**: ✅ IMPLEMENTED
 
 **Implementation Summary**:
-- `src/green/response_models.py` - Data models (ScheduledResponse, ShouldRespondResult, CalendarRSVPResult, ThreadContext, MessageContext, CalendarEventContext)
-- `src/green/prompts/response_prompts.py` - LLM prompt templates
-- `src/green/response_generator.py` - Main ResponseGenerator class (~1200 lines)
+- `src/green/response/models.py` - Data models (ScheduledResponse, ShouldRespondResult, CalendarRSVPResult, ThreadContext, MessageContext, CalendarEventContext)
+- `src/green/response/prompts.py` - LLM prompt templates
+- `src/green/response/generator.py` - Main ResponseGenerator class (~1200 lines)
 - 123 unit tests + 11 integration tests (Ollama and OpenAI)
 
 ---
@@ -252,7 +252,7 @@ class MessageContext:
 from langchain_core.language_models.chat_models import BaseChatModel
 from ues.client import AsyncUESClient
 from src.green.scenarios.schema import ScenarioConfig, CharacterProfile
-from src.green.message_collector import NewMessages
+from src.green.core.message_collector import NewMessages
 
 class ResponseGenerator:
     """Generates character responses to new messages during assessment.
