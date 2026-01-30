@@ -1,6 +1,6 @@
-# Response Generation Prompts
+# LLM Prompt Templates
 
-This module contains LLM prompt templates for the response generation system.
+This module contains LLM prompt templates for response generation and criterion evaluation.
 
 ## Overview
 
@@ -10,13 +10,15 @@ The prompt templates guide LLMs in:
 2. **Generating in-character response content**
 3. **Making calendar RSVP decisions**
 4. **Summarizing long conversation threads**
+5. **Evaluating Purple agent performance** against criteria
 
 ## Module Structure
 
 ```
 src/green/prompts/
 ├── __init__.py
-└── response_prompts.py    # All prompt templates and helpers
+├── response_prompts.py    # Response generation prompts
+└── evaluation_prompts.py  # Criterion evaluation prompts
 ```
 
 ## Prompt Templates
@@ -67,7 +69,22 @@ Summarizes long conversation threads to fit within context limits.
 
 **Output:** Concise summary of earlier messages
 
-## Helper Functions
+### Criterion Evaluation (evaluation_prompts.py)
+
+Evaluates Purple agent performance against a specific criterion using LLM judgment.
+
+**Templates:**
+- `LLM_EVALUATION_SYSTEM_PROMPT` - System context for fair evaluation
+- `LLM_EVALUATION_USER_TEMPLATE` - User prompt with criterion and context
+
+**Output:** `LLMEvaluationResult` (Pydantic model with `score`, `explanation`, `strengths`, `weaknesses`)
+
+**Helper Functions:**
+- `build_action_log_section(actions)` - Format action log for prompts
+- `build_state_comparison_section(initial, final)` - Format state changes
+- `build_evaluation_context_section(actions, initial, final)` - Build full context
+
+## Helper Functions (response_prompts.py)
 
 ### `build_special_instructions_section(instructions: str | None) -> str`
 Formats character special instructions for prompts.

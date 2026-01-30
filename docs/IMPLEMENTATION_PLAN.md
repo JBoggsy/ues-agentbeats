@@ -1506,7 +1506,7 @@ class ResponseGenerator:
         ...
 ```
 
-### 3.7 Criteria Judge (`judge.py`)
+### 3.7 Criteria Judge (`judge.py`) ✅ COMPLETE
 
 The `CriteriaJudge` evaluates Purple agent performance against scenario criteria.
 Depends on `LLMFactory` (3.3).
@@ -1518,109 +1518,40 @@ Depends on `LLMFactory` (3.3).
 4. Aggregate scores by dimension
 
 ```python
-from src.green.scenarios.schema import (
-    AgentBeatsEvalContext,
-    EvalResult,
-    EvaluatorFunc,
-    EvaluationCriterion,
-)
-from src.common.agentbeats.results import CriterionResult
+from src.green.judge import CriteriaJudge
+from src.green.llm_config import LLMFactory
+from src.common.agentbeats.updates import TaskUpdateEmitter
 
-class CriteriaJudge:
-    """Evaluates Purple agent performance against criteria.
-    
-    Supports two evaluation modes:
-    1. Programmatic evaluators - loaded from scenario's evaluators.py
-    2. LLM-based evaluators - use evaluation_prompt from criterion
-    
-    Created per-assessment since criteria and evaluators come from the
-    scenario configuration.
-    
-    Attributes:
-        llm: LangChain LLM for LLM-based evaluation.
-        criteria: List of evaluation criteria from scenario.
-        evaluators: Map of evaluator_id -> evaluator function.
-    """
-    
-    def __init__(
-        self,
-        llm: BaseChatModel,
-        criteria: list[EvaluationCriterion],
-        evaluators: EvaluatorRegistry,
-    ):
-        self.llm = llm
-        self.criteria = criteria
-        self._evaluators = evaluators
-    
-    async def evaluate_all(
-        self,
-        ctx: AgentBeatsEvalContext,
-    ) -> list[CriterionResult]:
-        """Evaluate all criteria and return results.
-        
-        Args:
-            ctx: Evaluation context with UES client, action log, states, etc.
-            
-        Returns:
-            List of CriterionResult, one per criterion.
-        """
-        results = []
-        for criterion in self.criteria:
-            result = await self._evaluate_criterion(ctx, criterion)
-            results.append(result)
-        return results
-    
-    async def _evaluate_criterion(
-        self,
-        ctx: AgentBeatsEvalContext,
-        criterion: EvaluationCriterion,
-    ) -> CriterionResult:
-        """Evaluate a single criterion.
-        
-        Dispatches to programmatic evaluator if available, otherwise
-        falls back to LLM-based evaluation using the criterion's prompt.
-        """
-        # Try registered programmatic evaluator first
-        if criterion.evaluator_id and criterion.evaluator_id in self._evaluators:
-            evaluator = self._evaluators[criterion.evaluator_id]
-            eval_result = await evaluator(ctx, criterion.params or {})
-        
-        # Fall back to LLM-based evaluation
-        elif criterion.evaluation_prompt:
-            eval_result = await self._llm_evaluate(ctx, criterion)
-        
-        else:
-            raise ValueError(
-                f"Criterion '{criterion.criterion_id}' has no evaluator_id "
-                "or evaluation_prompt"
-            )
-        
-        return CriterionResult(
-            criterion_id=criterion.criterion_id,
-            name=criterion.name,
-            dimension=criterion.dimension,
-            score=int(eval_result.score),
-            max_score=criterion.max_score,
-            explanation=eval_result.explanation,
-            details=eval_result.details,
-        )
-    
-    async def _llm_evaluate(
-        self,
-        ctx: AgentBeatsEvalContext,
-        criterion: EvaluationCriterion,
-    ) -> EvalResult:
-        """Use LLM to evaluate a criterion based on evaluation_prompt.
-        
-        Builds a prompt with the evaluation context (action log, states, etc.)
-        and the criterion's evaluation_prompt, then uses structured output
-        to get a score and explanation.
-        """
-        # Build evaluation prompt with context
-        # Call LLM with structured output schema
-        # Parse response into EvalResult
-        ...
+# Create judge with scenario criteria and evaluators
+judge = CriteriaJudge(
+    llm=LLMFactory.create("gpt-4o-mini"),
+    criteria=scenario.criteria,
+    evaluators=evaluator_registry,
+    emitter=task_update_emitter,  # Optional, for observability
+)
+
+# Evaluate all criteria (runs in parallel)
+results = await judge.evaluate_all(eval_context)
+
+# Aggregate scores by dimension
+scores = judge.aggregate_scores(results)
+# Returns: Scores(overall=OverallScore(...), dimensions={...})
+
+# Get unique dimensions from criteria
+dimensions = judge.get_dimensions()
+# Returns: ["accuracy", "efficiency", ...]
 ```
+
+**Key Features:**
+- **Parallel evaluation**: All criteria evaluated concurrently via `asyncio.gather()`
+- **Score scaling**: Evaluator scores scaled to match `criterion.max_score`
+- **Error handling**: Catches exceptions per-criterion, awards 0 points with explanation
+- **TaskUpdateEmitter integration**: Emits `criterion_evaluated` updates for observability
+- **Float scores**: Uses `float` for scores throughout to handle scaling accurately
+
+**Supporting Modules:**
+- `judge_models.py`: `LLMEvaluationResult` Pydantic model for structured LLM output
+- `prompts/evaluation_prompts.py`: Prompt templates and context builders for LLM evaluation
 
 ### 3.8 Green Agent (`agent.py`)
 

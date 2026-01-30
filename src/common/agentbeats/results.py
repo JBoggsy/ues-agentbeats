@@ -97,8 +97,8 @@ class DimensionScore(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message_type: Literal["dimension_score"] = "dimension_score"
-    score: int = Field(..., ge=0, description="Achieved score")
-    max_score: int = Field(..., ge=0, description="Maximum possible score")
+    score: float = Field(..., ge=0, description="Achieved score")
+    max_score: float = Field(..., ge=0, description="Maximum possible score")
 
     @property
     def percentage(self) -> float:
@@ -140,8 +140,8 @@ class OverallScore(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message_type: Literal["overall_score"] = "overall_score"
-    score: int = Field(..., ge=0, description="Total achieved score")
-    max_score: int = Field(..., ge=0, description="Maximum possible total score")
+    score: float = Field(..., ge=0, description="Total achieved score")
+    max_score: float = Field(..., ge=0, description="Maximum possible total score")
 
     @property
     def percentage(self) -> float:
@@ -197,16 +197,22 @@ class Scores(BaseModel):
 
     @model_validator(mode="after")
     def validate_overall_matches_dimensions(self) -> "Scores":
-        """Validate that overall score matches sum of dimension scores."""
+        """Validate that overall score matches sum of dimension scores.
+
+        Uses a small tolerance for floating-point comparison to handle
+        accumulated rounding errors from multiple criterion scores.
+        """
         total_score = sum(d.score for d in self.dimensions.values())
         total_max = sum(d.max_score for d in self.dimensions.values())
 
-        if self.overall.score != total_score:
+        # Use tolerance for float comparison (1e-6 handles typical rounding)
+        tolerance = 1e-6
+        if abs(self.overall.score - total_score) > tolerance:
             raise ValueError(
                 f"overall.score ({self.overall.score}) must equal sum of "
                 f"dimension scores ({total_score})"
             )
-        if self.overall.max_score != total_max:
+        if abs(self.overall.max_score - total_max) > tolerance:
             raise ValueError(
                 f"overall.max_score ({self.overall.max_score}) must equal sum of "
                 f"dimension max_scores ({total_max})"
@@ -258,8 +264,8 @@ class CriterionResult(BaseModel):
     dimension: ScoringDimension = Field(
         ..., description="Scoring dimension this criterion belongs to"
     )
-    score: int = Field(..., ge=0, description="Achieved score")
-    max_score: int = Field(..., ge=1, description="Maximum possible score (must be > 0)")
+    score: float = Field(..., ge=0, description="Achieved score")
+    max_score: float = Field(..., ge=0.01, description="Maximum possible score (must be > 0)")
     explanation: str = Field(..., description="Explanation of the score")
     details: dict[str, Any] | None = Field(
         default=None, description="Structured evaluation details"

@@ -301,8 +301,8 @@ class CriterionEvaluatedUpdate(BaseModel):
     criterion_id: str = Field(..., description="Criterion identifier")
     criterion_name: str = Field(..., description="Human-readable criterion name")
     dimension: str = Field(..., description="Scoring dimension")
-    score: int = Field(..., ge=0, description="Achieved score")
-    max_score: int = Field(..., ge=0, description="Maximum possible score")
+    score: float = Field(..., ge=0, description="Achieved score")
+    max_score: float = Field(..., ge=0, description="Maximum possible score")
     evaluation_method: Literal["programmatic", "llm"] = Field(
         ..., description="Evaluation method used"
     )
@@ -343,8 +343,8 @@ class AssessmentCompletedUpdate(BaseModel):
     total_turns: int = Field(..., ge=0, description="Total turns taken")
     total_actions: int = Field(..., ge=0, description="Total actions taken")
     duration_seconds: float = Field(..., ge=0, description="Duration in seconds")
-    overall_score: int = Field(..., ge=0, description="Final overall score")
-    max_score: int = Field(..., ge=0, description="Maximum possible score")
+    overall_score: float = Field(..., ge=0, description="Final overall score")
+    max_score: float = Field(..., ge=0, description="Maximum possible score")
 
 
 class ErrorOccurredUpdate(BaseModel):
@@ -764,8 +764,8 @@ class TaskUpdateEmitter:
         criterion_id: str,
         criterion_name: str,
         dimension: str,
-        score: int,
-        max_score: int,
+        score: float,
+        max_score: float,
         evaluation_method: Literal["programmatic", "llm"],
     ) -> TaskStatusUpdateEvent:
         """Emit a criterion evaluated update.
@@ -797,8 +797,8 @@ class TaskUpdateEmitter:
         total_turns: int,
         total_actions: int,
         duration_seconds: float,
-        overall_score: int,
-        max_score: int,
+        overall_score: float,
+        max_score: float,
     ) -> TaskStatusUpdateEvent:
         """Emit an assessment completed update.
 

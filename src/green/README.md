@@ -23,10 +23,13 @@ src/green/
 │   └── README.md          # Scenario module documentation
 ├── prompts/                # LLM prompt templates (✅ complete)
 │   ├── __init__.py
-│   └── response_prompts.py # Templates for response generation
+│   ├── response_prompts.py # Templates for response generation
+│   └── evaluation_prompts.py # Templates for criterion evaluation
 ├── assessment/             # Assessment orchestration (🚧 in progress)
 │   └── ...
 ├── action_log.py           # Action log builder (✅ complete)
+├── judge.py                # Criteria evaluation judge (✅ complete)
+├── judge_models.py         # LLM evaluation result models (✅ complete)
 ├── llm_config.py           # LLM factory for multiple providers (✅ complete)
 ├── message_collector.py    # New message collector (✅ complete)
 ├── response_models.py      # Response data models (✅ complete)
@@ -67,6 +70,41 @@ responses = await generator.process_new_messages(
     current_time=current_sim_time,
 )
 ```
+
+### Criteria Evaluation
+
+The `CriteriaJudge` evaluates Purple agent performance against scenario-defined criteria. It supports both programmatic evaluators (Python functions) and LLM-based evaluation.
+
+**Files:**
+- `judge.py` - Main `CriteriaJudge` class
+- `judge_models.py` - `LLMEvaluationResult` model for structured LLM output
+- `prompts/evaluation_prompts.py` - Prompt templates for LLM evaluation
+
+**Usage:**
+```python
+from src.green.judge import CriteriaJudge
+from src.green.llm_config import LLMFactory
+
+# Create judge with scenario criteria
+judge = CriteriaJudge(
+    llm=LLMFactory.create("gpt-4o-mini"),
+    criteria=scenario.criteria,
+    evaluators=evaluator_registry,
+    emitter=task_update_emitter,  # Optional
+)
+
+# Evaluate all criteria (parallel execution)
+results = await judge.evaluate_all(eval_context)
+
+# Aggregate scores by dimension
+scores = judge.aggregate_scores(results)
+```
+
+**Key Features:**
+- Parallel criterion evaluation via `asyncio.gather()`
+- Score scaling to match `criterion.max_score`
+- Error handling with 0-score fallback
+- TaskUpdateEmitter integration for observability
 
 ### LLM Configuration
 

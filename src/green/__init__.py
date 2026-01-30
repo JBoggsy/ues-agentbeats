@@ -7,14 +7,17 @@ Purple agents' performance. This package provides:
 - Assessment orchestration (turn-based execution loop)
 - Action log building (tracking Purple agent actions)
 - Response generation (character simulation)
-- Evaluation (criteria judging, scoring)
+- Criteria evaluation (judging, scoring)
+- LLM configuration (model factory)
+- Message collection (new message tracking)
 
 Modules:
     scenarios: Scenario schema and loading utilities
     action_log: Action log building for assessments
-    assessment: Assessment orchestration and turn handling
+    message_collector: New message collection from UES
     response_generator: Character response generation
-    evaluation: Criteria evaluation and scoring
+    judge: Criteria evaluation and scoring
+    llm_config: LLM factory for model instantiation
 
 Example:
     >>> from pathlib import Path
@@ -28,6 +31,17 @@ from src.green.action_log import (
     ActionLogBuilderError,
     InvalidTurnNumberError,
     InvalidTurnStateError,
+)
+from src.green.judge import (
+    CriteriaJudge,
+    CriteriaJudgeError,
+    EvaluationError,
+)
+from src.green.llm_config import (
+    LLMConfig,
+    LLMFactory,
+    LLMProvider,
+    UnsupportedModelError,
 )
 from src.green.scenarios import (
     CharacterProfile,
@@ -46,6 +60,15 @@ __all__ = [
     "ActionLogBuilderError",
     "InvalidTurnNumberError",
     "InvalidTurnStateError",
+    # Criteria judge
+    "CriteriaJudge",
+    "CriteriaJudgeError",
+    "EvaluationError",
+    # LLM configuration
+    "LLMConfig",
+    "LLMFactory",
+    "LLMProvider",
+    "UnsupportedModelError",
     # Scenario schema models
     "ResponseTiming",
     "CharacterProfile",

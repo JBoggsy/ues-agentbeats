@@ -106,26 +106,26 @@ from src.common.agentbeats import (
     ActionLogEntryWithTurn,
 )
 
-# Build criterion results
+# Build criterion results (scores are floats for scaling accuracy)
 criterion = CriterionResult(
     criterion_id="email_accuracy",
     name="Email Classification Accuracy",
     dimension="accuracy",
-    score=8,
-    max_score=10,
-    explanation="Correctly classified 8 out of 10 emails.",
+    score=8.5,  # Float for scaled scores
+    max_score=10.0,
+    explanation="Correctly classified 8.5 out of 10 emails.",
     details={"correct": 8, "incorrect": 2},
 )
 
-# Build dimension scores
+# Build dimension scores (floats)
 dimension_scores = {
-    "accuracy": DimensionScore(score=8, max_score=10),
-    "efficiency": DimensionScore(score=7, max_score=10),
+    "accuracy": DimensionScore(score=8.5, max_score=10.0),
+    "efficiency": DimensionScore(score=7.0, max_score=10.0),
 }
 
-# Build overall scores
+# Build overall scores (floats)
 scores = Scores(
-    overall=OverallScore(score=15, max_score=20),
+    overall=OverallScore(score=15.5, max_score=20.0),
     dimensions=dimension_scores,
 )
 
@@ -191,14 +191,14 @@ event = emitter.action_observed(
     notes="Responding to Alice's question",
 )
 
-# Emit assessment completed
+# Emit assessment completed (scores are floats)
 event = emitter.assessment_completed(
     reason="scenario_complete",
     total_turns=10,
     total_actions=25,
     duration_seconds=1234.5,
-    overall_score=85,
-    max_score=100,
+    overall_score=85.5,   # Float for scaled scores
+    max_score=100.0,
 )
 ```
 
@@ -301,13 +301,16 @@ result = parse_result(result_data)
 |------------|-------------|
 | `ScoringDimension` | Literal type for valid dimension names |
 | `ALL_DIMENSIONS` | List of all scoring dimensions |
-| `DimensionScore` | Score for a single dimension with percentage calculation |
-| `OverallScore` | Total score across all dimensions |
-| `Scores` | Container for overall and dimension scores |
-| `CriterionResult` | Result for a single evaluation criterion |
+| `DimensionScore` | Score for a single dimension (float scores, includes percentage) |
+| `OverallScore` | Total score across all dimensions (float scores) |
+| `Scores` | Container for overall and dimension scores (validated sum) |
+| `CriterionResult` | Result for a single evaluation criterion (float score) |
 | `ActionLogEntryWithTurn` | Action log entry with turn context |
 | `AssessmentResults` | Complete assessment results artifact |
 | `AssessmentStatus` | Literal type for assessment status values |
+
+**Note:** All score fields use `float` type to support accurate score scaling when
+evaluator scores are scaled to match criterion `max_score` values.
 | `parse_result(data)` | Parse dict into appropriate result type |
 
 **Scoring Dimensions:**
