@@ -141,3 +141,5 @@ The competition requires Docker images for reproducible assessments:
 - **AgentBeats Docs**: https://docs.agentbeats.org/
 - **Green Agent Template**: https://github.com/RDI-Foundation/green-agent-template
 - **Purple Agent Template**: https://github.com/RDI-Foundation/agent-template
+- **UES Source Code**: `~/Coding/personal/ues/`
+- **UES Docs**: `~/Coding/personal/ues/docs/`

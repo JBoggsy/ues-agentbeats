@@ -20,7 +20,6 @@ from src.common.agentbeats.config import (
     validate_config,
 )
 from src.common.agentbeats.messages import (
-    ActionLogEntry,
     AssessmentCompleteMessage,
     AssessmentStartMessage,
     CalendarSummary,
@@ -35,7 +34,7 @@ from src.common.agentbeats.messages import (
 )
 from src.common.agentbeats.results import (
     ALL_DIMENSIONS,
-    ActionLogEntryWithTurn,
+    ActionLogEntry,
     AssessmentResults,
     AssessmentStatus,
     CriterionResult,
@@ -77,7 +76,6 @@ __all__ = [
     # Message models
     "AssessmentStartMessage",
     "TurnStartMessage",
-    "ActionLogEntry",
     "TurnCompleteMessage",
     "AssessmentCompleteMessage",
     "EarlyCompletionMessage",
@@ -88,7 +86,7 @@ __all__ = [
     "OverallScore",
     "Scores",
     "CriterionResult",
-    "ActionLogEntryWithTurn",
+    "ActionLogEntry",
     "AssessmentResults",
     # Result types
     "ScoringDimension",

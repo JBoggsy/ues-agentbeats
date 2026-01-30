@@ -306,10 +306,11 @@ class TurnStartMessage(BaseModel):
 class ActionLogEntry(BaseModel):
     """Single action taken by Purple agent during a turn.
     
-    Purple agent reports these in TurnCompleteMessage.
+    Built from UES event history, filtered by Purple agent's agent_id.
     Green agent adds turn number when aggregating into assessment results.
     """
     message_type: Literal["action_log_entry"] = "action_log_entry"
+    turn: int  # Turn number when action occurred
     timestamp: datetime
     action: str  # e.g., "email.send", "calendar.create", "sms.reply"
     parameters: dict  # Action-specific parameters
@@ -319,12 +320,11 @@ class ActionLogEntry(BaseModel):
 class TurnCompleteMessage(BaseModel):
     """Message sent from Purple to Green when turn completes.
     
-    Purple agent reports all actions taken during the turn. The Green agent
-    uses this to build the assessment action log directly, rather than
-    reconstructing it from UES event history.
+    Purple agent signals turn completion. The Green agent builds the
+    action log by querying UES event history, filtering for events
+    attributed to the Purple agent.
     """
     message_type: Literal["turn_complete"] = "turn_complete"
-    actions: list[ActionLogEntry]
     notes: str | None = None  # Optional reasoning/transparency
     time_step: str = "PT1H"  # ISO 8601 duration
 
@@ -446,11 +446,11 @@ debugging, and observability.
 - `ErrorOccurredUpdate`: An error occurred
 
 - `ActionObservedUpdate`: Logs a Purple agent action (emitted by Green when
-  processing TurnCompleteMessage)
+  processing UES events)
 
 **Note**: All task updates are emitted by the Green agent. Purple agents do not
-emit updates directly - they report actions via `TurnCompleteMessage`, and the
-Green agent logs each action as an `ActionObservedUpdate`.
+emit updates directly - actions are captured from UES event history, and the
+Green agent logs each Purple action as an `ActionObservedUpdate`.
 
 ```python
 class TaskUpdateType(str, Enum):
@@ -470,8 +470,8 @@ class TaskUpdateType(str, Enum):
 class ActionObservedUpdate(BaseModel):
     """Update emitted by Green agent when logging a Purple agent action.
     
-    The Green agent emits this for each ActionLogEntry in a TurnCompleteMessage
-    received from the Purple agent. Captures all details for audit/debugging.
+    The Green agent emits this for each action found in UES event history
+    that is attributed to the Purple agent. Captures all details for audit/debugging.
     """
     message_type: Literal["update_action_observed"] = "update_action_observed"
     turn_number: int
@@ -516,7 +516,7 @@ class TaskUpdateEmitter:
         max_score: int,
     ) -> TaskStatusUpdateEvent: ...
     
-    # Called when processing TurnCompleteMessage from Purple agent
+    # Called when processing UES events from Purple agent
     def action_observed(
         self,
         turn_number: int,
@@ -902,13 +902,13 @@ reasoning model handling, error cases, and edge cases.
 
 **Status**: Implemented and tested (67 tests passing).
 
-Simple helper class for building the assessment action log from Purple agent
-turn reports. No dependencies on other Green agent modules.
+Helper class for building the assessment action log from UES event history.
+Queries UES events after time advances and filters for Purple agent actions.
 
 **Key Features:**
-- Strict turn sequencing (turns must be sequential starting from 1)
-- Turn lifecycle management (`start_turn()`, `end_turn()`)
-- Action logging with turn context (`add_action()`, `add_actions()`)
+- Takes `purple_agent_id` in constructor for event filtering
+- `add_events_from_turn()` processes UES events, returns Purple entries and Green events separately
+- Converts UES `EventResponse` dicts to `ActionLogEntry` models
 - Statistics methods (`get_total_actions()`, `get_successful_actions()`, `get_failed_actions()`)
 - Filtering methods (`get_actions_by_turn()`, `get_actions_by_type()`)
 - Reset capability for reuse across assessments (`reset()`)
@@ -920,61 +920,64 @@ turn reports. No dependencies on other Green agent modules.
 
 ```python
 class ActionLogBuilder:
-    """Builds assessment action log from Purple agent turn reports.
+    """Builds assessment action log from UES event history.
     
-    The action log is built directly from Purple agent's TurnCompleteMessage
-    reports, rather than being reconstructed from UES event history. This:
-    - Ensures Purple agent is responsible for accurate action reporting
-    - Simplifies Green agent implementation (no need to parse UES events)
-    - Gives Purple agent control over action naming/categorization
+    The action log is built from UES event history after time advances,
+    filtering for events attributed to the Purple agent via agent_id.
+    This provides accurate, tamper-proof action recording.
     
     Lifecycle:
-    1. Call start_turn(turn_number) to begin a new turn
-    2. Call add_action(entry) for each action (zero or more)
-    3. Call end_turn() to complete the turn
-    4. Repeat for additional turns
-    5. Call get_log() to retrieve all entries
+    1. Create with purple_agent_id
+    2. After each time advance, call add_events_from_turn(events)
+    3. Returns (purple_entries, green_events) tuple
+    4. Use purple_entries for action log, green_events for response generation
+    5. Call get_log() to retrieve all Purple entries
     
     Use reset() to clear all entries and start fresh for a new assessment.
     """
     
+    def __init__(self, purple_agent_id: str):
+        """Initialize builder with Purple agent's agent_id for filtering."""
+    
     @property
     def current_turn(self) -> int:
-        """Return current turn number (0 if no turn started)."""
+        """Return highest turn number processed (0 if none)."""
     
-    @property
-    def is_turn_active(self) -> bool:
-        """Return whether a turn is currently active."""
+    def add_events_from_turn(
+        self,
+        events: list[dict[str, Any]],
+    ) -> tuple[list[ActionLogEntry], list[dict[str, Any]]]:
+        """Process UES events from a turn.
+        
+        Filters events by agent_id to separate Purple actions from
+        Green-scheduled events and scenario-initiated events.
+        
+        Args:
+            events: List of UES EventResponse dicts from the turn.
+            
+        Returns:
+            Tuple of (purple_entries, green_events) where:
+            - purple_entries: ActionLogEntry objects for Purple's actions
+            - green_events: Raw event dicts for response generation
+        """
     
-    def start_turn(self, turn_number: int) -> None:
-        """Start a new turn (must be sequential)."""
-    
-    def end_turn(self) -> int:
-        """End current turn, return action count for turn."""
-    
-    def add_action(self, entry: ActionLogEntry) -> ActionLogEntryWithTurn:
-        """Add action to current turn, return entry with turn context."""
-    
-    def add_actions(self, entries: list[ActionLogEntry]) -> list[ActionLogEntryWithTurn]:
-        """Add multiple actions to current turn."""
-    
-    def get_log(self) -> list[ActionLogEntryWithTurn]:
-        """Return copy of complete action log."""
+    def get_log(self) -> list[ActionLogEntry]:
+        """Return copy of complete action log (Purple actions only)."""
     
     def get_total_actions(self) -> int:
-        """Return total number of actions logged."""
+        """Return total number of Purple actions logged."""
     
     def get_successful_actions(self) -> int:
-        """Return number of successful actions."""
+        """Return number of successful Purple actions."""
     
     def get_failed_actions(self) -> int:
-        """Return number of failed actions."""
+        """Return number of failed Purple actions."""
     
-    def get_actions_by_turn(self, turn_number: int) -> list[ActionLogEntryWithTurn]:
-        """Return all actions for a specific turn."""
+    def get_actions_by_turn(self, turn_number: int) -> list[ActionLogEntry]:
+        """Return all Purple actions for a specific turn."""
     
-    def get_actions_by_type(self, action_type: str) -> list[ActionLogEntryWithTurn]:
-        """Return all actions of a specific type."""
+    def get_actions_by_type(self, action_type: str) -> list[ActionLogEntry]:
+        """Return all Purple actions of a specific type."""
     
     def reset(self) -> None:
         """Clear all entries and reset for new assessment."""
@@ -983,35 +986,131 @@ class ActionLogBuilder:
 **Tests**: 67 tests covering initial state, turn management, action logging,
 statistics, filtering, reset functionality, exception handling, and edge cases.
 
-### 3.5 Response Generation (`response_generator.py`)
+### 3.5 New Message Collector (`message_collector.py`) ✅ COMPLETE
 
-The `ResponseGenerator` creates in-character responses from simulated contacts when
-the Purple agent sends messages. Depends on `LLMFactory` (3.3).
+**Status**: Implemented and tested (41 tests passing).
+
+The `NewMessageCollector` queries UES modality states for new messages since the
+last check. Unlike querying the event log, this approach gives direct access to
+full message objects with all fields needed for response generation (including
+`message_id` and `thread_id`).
+
+**Why not use the event log?**
+1. UES events may not include `message_id` or `thread_id` for emails/SMS
+2. Most events aren't response-triggering, making event scanning wasteful
+
+**Query strategies by modality:**
+- **Email**: `client.email.query(received_after=timestamp)`
+- **SMS**: `client.sms.query(sent_after=timestamp)`
+- **Calendar**: Compare event IDs (no creation-time filter available)
+
+**Key Classes:**
+
+```python
+@dataclass
+class NewMessages:
+    """Container for new messages collected from UES modalities."""
+    emails: list[Email] = field(default_factory=list)
+    sms_messages: list[SMSMessage] = field(default_factory=list)
+    calendar_events: list[CalendarEvent] = field(default_factory=list)
+    
+    @property
+    def total_count(self) -> int: ...
+    def is_empty(self) -> bool: ...
+
+
+class NewMessageCollector:
+    """Collects new messages from UES modalities since a timestamp.
+    
+    Lifecycle:
+    1. Create with UES client
+    2. Call initialize() to set baseline (records time, captures event IDs)
+    3. After each time advance, call collect() to get new messages
+    4. Call reset() to start fresh for a new assessment
+    """
+    
+    def __init__(self, client: AsyncUESClient) -> None: ...
+    
+    @property
+    def is_initialized(self) -> bool: ...
+    
+    @property
+    def last_check_time(self) -> datetime | None: ...
+    
+    async def initialize(self, current_time: datetime) -> None:
+        """Initialize collector with baseline state."""
+    
+    async def collect(self, current_time: datetime) -> NewMessages:
+        """Collect new messages since last check."""
+    
+    def reset(self) -> None:
+        """Reset collector state for a new assessment."""
+```
+
+**Exceptions:**
+- `MessageCollectorError`: Base exception class
+- `CollectorNotInitializedError`: Raised when `collect()` called before `initialize()`
+
+**Tests**: 41 tests covering initialization, collection, reset, edge cases, and
+exception handling.
+
+### 3.6 Response Generation (`response_generator.py`) ✅ COMPLETE
+
+**Status**: Implemented and tested (54 tests for ResponseGenerator, plus 40 tests for response_models.py and 29 tests for prompts, totaling 123 response-related tests).
+
+**Implementation Details**:
+- See `docs/design/RESPONSE_GENERATION_DESIGN.md` for comprehensive design documentation
+- `src/green/response_models.py` - Data models including `ScheduledResponse`, `ShouldRespondResult`, `CalendarRSVPResult`, `ThreadContext`, `MessageContext`, `CalendarEventContext`
+- `src/green/prompts/response_prompts.py` - LLM prompt templates for response generation decisions
+- `src/green/response_generator.py` - Main `ResponseGenerator` class (~1200 lines)
+
+The `ResponseGenerator` creates in-character responses from simulated contacts
+based on new messages collected during the assessment. Depends on `LLMFactory` (3.3)
+and `NewMessageCollector` (3.5).
 
 **Responsibilities:**
-1. Analyze Purple agent actions for outgoing communications
+1. Process new emails, SMS messages, and calendar events from `NewMessageCollector`
 2. Determine if characters should respond (based on message content and character personality)
 3. Generate in-character response content using LLM
 4. Return scheduled responses for the `GreenAgent` to inject into UES
 
-```python    
+**Message Types Processed:**
+- **Emails**: All new emails received since last check (from `Email` objects)
+- **SMS**: All new SMS messages since last check (from `SMSMessage` objects)
+- **Calendar**: All new calendar events since last check (from `CalendarEvent` objects)
+
+```python
+from ues.client._email import Email
+from ues.client._sms import SMSMessage
+from ues.client._calendar import CalendarEvent
+from src.green.message_collector import NewMessages
+
 class ScheduledResponse(BaseModel):
     """A response to be scheduled in UES."""
     character_id: str
     modality: Literal["email", "sms", "calendar"]
     response_content: str | dict  # str for message, dict for calendar RSVP
     scheduled_time: datetime
+    # Context for scheduling (thread_id, reply_to, etc.)
+    thread_id: str | None = None
+    in_reply_to: str | None = None  # message_id for email replies
+    subject: str | None = None  # For email responses
+
 
 class ResponseGenerator:
-    """Generates character responses to Purple agent actions.
+    """Generates character responses to new messages during assessment.
     
     Created per-assessment since it depends on the scenario's character
     profiles. The GreenAgent handles actually scheduling the responses
     in UES after receiving them from this generator.
     
+    Processes new messages from all modalities uniformly. Each message
+    is checked to see if any recipient character should respond.
+    
     Attributes:
         ues_client: For fetching thread history and current state.
         characters: Map of character_id -> CharacterProfile from scenario.
+        user_character: The CharacterProfile representing the user (for exclusion).
         llm: LangChain LLM for generating response content.
     """
     
@@ -1019,79 +1118,395 @@ class ResponseGenerator:
         self,
         ues_client: AsyncUESClient,
         characters: dict[str, CharacterProfile],
+        user_character: CharacterProfile,
         llm: BaseChatModel,
     ):
         self.ues_client = ues_client
         self.characters = characters
+        self.user_character = user_character
         self.llm = llm
     
-    async def process_turn_actions(
+    async def process_new_messages(
         self,
-        actions: list[ActionLogEntry],
+        new_messages: NewMessages,
     ) -> list[ScheduledResponse]:
-        """Analyze Purple's turn actions and generate character responses.
+        """Generate character responses to new messages.
         
-        Scans actions for outgoing messages (email.send, sms.send, etc.)
-        and generates appropriate character responses based on character
-        profiles and response timing settings.
+        Processes all new messages collected by NewMessageCollector.
+        For each message, identifies recipient characters and determines
+        if they should respond.
         
         Args:
-            actions: List of actions taken by Purple this turn.
+            new_messages: Container with new emails, SMS, and calendar events.
             
         Returns:
             List of responses to schedule in UES.
         """
-        responses = []
+        responses: list[ScheduledResponse] = []
         
-        for action in actions:
-            if not action.success:
-                continue  # Don't respond to failed actions
-            
-            # Check if this is an outgoing communication
-            if action.action in ("email.send", "sms.send"):
-                recipient = self._extract_recipient(action)
-                character = self._find_character_by_contact(recipient)
-                
-                if character and await self._should_respond(action, character):
-                    response = await self._generate_response(action, character)
-                    if response:
-                        responses.append(response)
+        for email in new_messages.emails:
+            responses.extend(await self._process_email(email))
+        
+        for sms in new_messages.sms_messages:
+            responses.extend(await self._process_sms(sms))
+        
+        for event in new_messages.calendar_events:
+            responses.extend(await self._process_calendar_event(event))
         
         return responses
     
-    async def _should_respond(
+    async def _process_email(self, email: Email) -> list[ScheduledResponse]:
+        """Process a single email and generate any character responses.
+        
+        Checks all recipients (to, cc) against scenario characters.
+        The sender is excluded from potential responders.
+        """
+        responses: list[ScheduledResponse] = []
+        sender_address = email.from_address
+        
+        # Collect all recipient addresses
+        recipient_addresses = set(email.to_addresses + email.cc_addresses)
+        
+        for address in recipient_addresses:
+            character = self._find_character_by_email(address)
+            if not character:
+                continue
+            
+            # Skip if this character was the sender
+            if self._character_has_email(character, sender_address):
+                continue
+            
+            # Skip if this is the user character
+            if character.character_id == self.user_character.character_id:
+                continue
+            
+            if await self._should_respond_to_email(email, character):
+                response = await self._generate_email_response(email, character)
+                if response:
+                    responses.append(response)
+        
+        return responses
+    
+    async def _process_sms(self, sms: SMSMessage) -> list[ScheduledResponse]:
+        """Process a single SMS message and generate any character responses.
+        
+        Checks all recipient numbers against scenario characters.
+        The sender is excluded from potential responders.
+        """
+        responses: list[ScheduledResponse] = []
+        sender_number = sms.from_number
+        
+        for number in sms.to_numbers:
+            character = self._find_character_by_phone(number)
+            if not character:
+                continue
+            
+            # Skip if this character was the sender
+            if self._character_has_phone(character, sender_number):
+                continue
+            
+            # Skip if this is the user character
+            if character.character_id == self.user_character.character_id:
+                continue
+            
+            if await self._should_respond_to_sms(sms, character):
+                response = await self._generate_sms_response(sms, character)
+                if response:
+                    responses.append(response)
+        
+        return responses
+    
+    async def _process_calendar_event(
         self,
-        action: ActionLogEntry,
+        event: CalendarEvent,
+    ) -> list[ScheduledResponse]:
+        """Process a calendar event and generate RSVP responses from attendees.
+        
+        For calendar events, character attendees may respond with RSVP.
+        """
+        responses: list[ScheduledResponse] = []
+        
+        for attendee in event.attendees:
+            # Skip if already responded
+            if attendee.response_status != "needs_action":
+                continue
+            
+            character = self._find_character_by_email(attendee.email)
+            if not character:
+                continue
+            
+            # Skip if this is the user character
+            if character.character_id == self.user_character.character_id:
+                continue
+            
+            # Generate RSVP response
+            rsvp = await self._generate_calendar_rsvp(event, character)
+            if rsvp:
+                responses.append(rsvp)
+        
+        return responses
+    
+    # --- Helper methods ---
+    
+    def _find_character_by_email(self, email: str) -> CharacterProfile | None:
+        """Find a character by email address."""
+        for character in self.characters.values():
+            if email in character.email_addresses:
+                return character
+        return None
+    
+    def _find_character_by_phone(self, phone: str) -> CharacterProfile | None:
+        """Find a character by phone number."""
+        for character in self.characters.values():
+            if phone in character.phone_numbers:
+                return character
+        return None
+    
+    def _character_has_email(self, character: CharacterProfile, email: str) -> bool:
+        """Check if a character owns an email address."""
+        return email in character.email_addresses
+    
+    def _character_has_phone(self, character: CharacterProfile, phone: str) -> bool:
+        """Check if a character owns a phone number."""
+        return phone in character.phone_numbers
+    
+    # --- Response decision methods ---
+    
+    async def _should_respond_to_email(
+        self,
+        email: Email,
         character: CharacterProfile,
     ) -> bool:
-        """Determine if a character response is warranted.
+        """Determine if character should respond to this email.
         
-        Uses LLM to decide based on message content, character personality,
-        and context. Some messages (like acknowledgments) may not need replies.
+        Uses LLM to decide based on:
+        - Message content (does it expect a reply?)
+        - Character personality and special instructions
+        - Thread context (conversation history)
         """
-        # Implementation uses LLM with character profile context
-        ...
+        # Pre-LLM heuristic checks
+        if self._is_non_responder(character):
+            return False
+        
+        # Get thread history for context
+        thread_history = await self._get_email_thread_history(email.thread_id)
+        
+        # Use LLM to decide
+        return await self._llm_should_respond(
+            modality="email",
+            character=character,
+            message_content=email.body_text,
+            sender_name=email.from_address,
+            thread_history=thread_history,
+        )
     
-    async def _generate_response(
+    async def _should_respond_to_sms(
         self,
-        action: ActionLogEntry,
+        sms: SMSMessage,
+        character: CharacterProfile,
+    ) -> bool:
+        """Determine if character should respond to this SMS."""
+        if self._is_non_responder(character):
+            return False
+        
+        thread_history = await self._get_sms_thread_history(sms.thread_id)
+        
+        return await self._llm_should_respond(
+            modality="sms",
+            character=character,
+            message_content=sms.body,
+            sender_name=sms.from_number,
+            thread_history=thread_history,
+        )
+    
+    def _is_non_responder(self, character: CharacterProfile) -> bool:
+        """Check if character is configured as a non-responder."""
+        # Check special instructions for "no response", "automated", etc.
+        if character.special_instructions:
+            lower = character.special_instructions.lower()
+            if any(kw in lower for kw in ["no response", "automated", "do not respond"]):
+                return True
+        
+        # Check for "never responds" timing pattern
+        timing = character.response_timing
+        if timing.base_delay >= timedelta(hours=24) and timing.variance == timedelta(0):
+            return True
+        
+        return False
+    
+    # --- Response generation methods ---
+    
+    async def _generate_email_response(
+        self,
+        email: Email,
         character: CharacterProfile,
     ) -> ScheduledResponse | None:
-        """Generate an in-character response.
+        """Generate an in-character email response."""
+        thread_history = await self._get_email_thread_history(email.thread_id)
         
-        Uses LLM with character profile to generate contextually appropriate
-        response. Calculates response timing based on character's response_timing.
-        """
-        # Get thread history for context
-        thread_history = await self._get_thread_history(action, character)
+        content = await self._llm_generate_response(
+            modality="email",
+            character=character,
+            message_content=email.body_text,
+            sender_name=email.from_address,
+            thread_history=thread_history,
+        )
         
-        # Build prompt with character personality
-        # Generate response using LLM
-        # Calculate scheduled time based on character.response_timing
+        if not content:
+            return None
+        
+        scheduled_time = self._calculate_response_time(
+            character.response_timing,
+            email.received_at,
+        )
+        
+        return ScheduledResponse(
+            character_id=character.character_id,
+            modality="email",
+            response_content=content,
+            scheduled_time=scheduled_time,
+            thread_id=email.thread_id,
+            in_reply_to=email.message_id,
+            subject=self._derive_email_subject(email.subject),
+        )
+    
+    async def _generate_sms_response(
+        self,
+        sms: SMSMessage,
+        character: CharacterProfile,
+    ) -> ScheduledResponse | None:
+        """Generate an in-character SMS response."""
+        thread_history = await self._get_sms_thread_history(sms.thread_id)
+        
+        content = await self._llm_generate_response(
+            modality="sms",
+            character=character,
+            message_content=sms.body,
+            sender_name=sms.from_number,
+            thread_history=thread_history,
+        )
+        
+        if not content:
+            return None
+        
+        scheduled_time = self._calculate_response_time(
+            character.response_timing,
+            sms.sent_at,
+        )
+        
+        return ScheduledResponse(
+            character_id=character.character_id,
+            modality="sms",
+            response_content=content,
+            scheduled_time=scheduled_time,
+            thread_id=sms.thread_id,
+        )
+    
+    async def _generate_calendar_rsvp(
+        self,
+        event: CalendarEvent,
+        character: CharacterProfile,
+    ) -> ScheduledResponse | None:
+        """Generate a calendar RSVP response."""
+        # Use LLM to decide accept/decline/tentative based on character profile
+        rsvp_decision = await self._llm_calendar_rsvp(event, character)
+        
+        if not rsvp_decision:
+            return None
+        
+        scheduled_time = self._calculate_response_time(
+            character.response_timing,
+            event.created_at or datetime.now(timezone.utc),
+        )
+        
+        return ScheduledResponse(
+            character_id=character.character_id,
+            modality="calendar",
+            response_content=rsvp_decision,  # {"status": "accepted"|"declined"|"tentative"}
+            scheduled_time=scheduled_time,
+        )
+    
+    # --- Thread history retrieval ---
+    
+    async def _get_email_thread_history(self, thread_id: str) -> list[Email]:
+        """Retrieve full email thread history."""
+        result = await self.ues_client.email.query(
+            thread_id=thread_id,
+            sort_order="asc",
+        )
+        return result.emails
+    
+    async def _get_sms_thread_history(self, thread_id: str) -> list[SMSMessage]:
+        """Retrieve full SMS thread history."""
+        result = await self.ues_client.sms.query(
+            thread_id=thread_id,
+            sort_order="asc",
+        )
+        return result.messages
+    
+    # --- Utility methods ---
+    
+    def _calculate_response_time(
+        self,
+        timing: ResponseTiming,
+        reference_time: datetime,
+    ) -> datetime:
+        """Calculate when a response should be scheduled."""
+        base_seconds = timing.base_delay.total_seconds()
+        variance_seconds = timing.variance.total_seconds()
+        
+        min_delay = max(0, base_seconds - variance_seconds)
+        max_delay = base_seconds + variance_seconds
+        delay_seconds = random.uniform(min_delay, max_delay)
+        
+        return reference_time + timedelta(seconds=delay_seconds)
+    
+    def _derive_email_subject(self, original_subject: str) -> str:
+        """Derive reply subject line."""
+        if original_subject.lower().startswith("re:"):
+            return original_subject
+        return f"Re: {original_subject}"
+    
+    # --- LLM interaction methods (stubs) ---
+    
+    async def _llm_should_respond(
+        self,
+        modality: str,
+        character: CharacterProfile,
+        message_content: str,
+        sender_name: str,
+        thread_history: list,
+    ) -> bool:
+        """Use LLM to decide if character should respond."""
+        # Build prompt with character profile, message, thread history
+        # Call LLM with structured output for {"should_respond": bool, "reasoning": str}
+        ...
+    
+    async def _llm_generate_response(
+        self,
+        modality: str,
+        character: CharacterProfile,
+        message_content: str,
+        sender_name: str,
+        thread_history: list,
+    ) -> str | None:
+        """Use LLM to generate in-character response content."""
+        # Build prompt with character profile, conversation context
+        # Call LLM to generate response text
+        ...
+    
+    async def _llm_calendar_rsvp(
+        self,
+        event: CalendarEvent,
+        character: CharacterProfile,
+    ) -> dict | None:
+        """Use LLM to decide calendar RSVP."""
+        # Consider event details, character's schedule/personality
+        # Return {"status": "accepted"|"declined"|"tentative", "comment": "..."}
         ...
 ```
 
-### 3.6 Criteria Judge (`judge.py`)
+### 3.7 Criteria Judge (`judge.py`)
 
 The `CriteriaJudge` evaluates Purple agent performance against scenario criteria.
 Depends on `LLMFactory` (3.3).
@@ -1207,7 +1622,7 @@ class CriteriaJudge:
         ...
 ```
 
-### 3.7 Green Agent (`agent.py`)
+### 3.8 Green Agent (`agent.py`)
 
 The `GreenAgent` class is the high-level orchestrator for assessments. Each instance
 owns its own UES server and can run multiple sequential assessments (one per task).
@@ -1229,6 +1644,7 @@ owns its own UES server and can run multiple sequential assessments (one per tas
 | `ResponseGenerator` | Per-assessment | Needs scenario's character profiles |
 | `CriteriaJudge` | Per-assessment | Needs scenario's evaluation criteria and evaluators |
 | `ActionLogBuilder` | Per-assessment | Tracks actions for one assessment |
+| `NewMessageCollector` | Per-assessment | Tracks new messages for one assessment |
 
 ```python
 class GreenAgent:
@@ -1345,10 +1761,18 @@ class GreenAgent:
         self._cancelled = False
         
         # Create per-assessment helper objects
-        action_log_builder = ActionLogBuilder()
+        # Note: ActionLogBuilder needs purple_agent_id for event filtering
+        purple_agent_id = await self._get_purple_agent_id(purple_client)
+        action_log_builder = ActionLogBuilder(purple_agent_id=purple_agent_id)
+        
+        # NewMessageCollector queries modality states for new messages
+        message_collector = NewMessageCollector(client=self.ues_client)
+        
+        # ResponseGenerator uses NewMessages objects (not raw events)
         response_generator = ResponseGenerator(
             ues_client=self.ues_client,
             characters=scenario.characters,
+            user_character=scenario.get_user_character_profile(),
             llm=self.response_llm,
         )
         criteria_judge = CriteriaJudge(
@@ -1360,6 +1784,11 @@ class GreenAgent:
         try:
             # Phase 1: Setup
             await self._setup_assessment(scenario, updater)
+            
+            # Initialize message collector AFTER UES is set up
+            # This establishes baseline time and captures existing calendar events
+            time_state = await self.ues_client.time.get_state()
+            await message_collector.initialize(time_state.current_time)
             
             # Phase 2: Send start message to Purple
             initial_state_summary = await self._build_initial_state_summary()
@@ -1382,6 +1811,7 @@ class GreenAgent:
                     updater=updater,
                     purple_client=purple_client,
                     action_log_builder=action_log_builder,
+                    message_collector=message_collector,
                     response_generator=response_generator,
                 )
                 early_completion = turn_result.early_completion
@@ -1448,6 +1878,7 @@ class GreenAgent:
         updater: TaskUpdater,
         purple_client: A2AClientWrapper,
         action_log_builder: ActionLogBuilder,
+        message_collector: NewMessageCollector,
         response_generator: ResponseGenerator,
     ) -> TurnResult:
         """Execute a single assessment turn.
@@ -1455,30 +1886,30 @@ class GreenAgent:
         A turn consists of:
         1. Send TurnStartMessage to Purple
         2. Wait for TurnCompleteMessage (or EarlyCompletionMessage)
-        3. Log actions from Purple's response
-        4. Generate character responses to Purple's actions
-        5. Schedule responses in UES
-        6. Advance simulation time
+        3. Advance simulation time
+        4. Query UES events for action log (Purple agent actions)
+        5. Collect new messages from modalities (for response generation)
+        6. Generate character responses to new messages
+        7. Schedule responses in UES (will fire on next time advance)
         
         Args:
             turn: Current turn number (1-indexed).
             updater: For emitting task updates.
             purple_client: For communicating with Purple agent.
-            action_log_builder: For recording actions.
+            action_log_builder: For recording actions from UES events.
+            message_collector: For collecting new messages from modalities.
             response_generator: For generating character responses.
             
         Returns:
             TurnResult with turn outcome details.
         """
-        action_log_builder.start_turn(turn)
-        
         # Get current simulation time
         time_state = await self.ues_client.time.get_state()
-        current_time = time_state.current_time
+        turn_start_time = time_state.current_time
         
         # Send turn start to Purple
         turn_start = TurnStartMessage(
-            current_time=current_time,
+            current_time=turn_start_time,
             turn_number=turn,
             events_processed=0,  # TODO: Track from previous turn
         )
@@ -1506,26 +1937,44 @@ class GreenAgent:
         
         turn_complete = TurnCompleteMessage.model_validate(response_data)
         
-        # Log Purple's actions
-        action_log_builder.add_turn_actions(turn_complete.actions)
+        # Advance simulation time FIRST (scheduled events fire during this)
+        events_processed = await self._advance_time(turn_complete.time_step)
+        
+        # Get the new current time after advancement
+        time_state = await self.ues_client.time.get_state()
+        current_time = time_state.current_time
+        
+        # --- Action Log: Query events for Purple agent tracking ---
+        # This is for scoring and audit purposes
+        events = await self.ues_client.events.get_events(
+            since=turn_start_time,
+            until=current_time,
+        )
+        
+        # Build action log from events (filters by Purple agent_id)
+        purple_entries = action_log_builder.add_events_from_turn(
+            turn=turn,
+            events=events,
+        )
         
         # Emit action updates for observability
-        for action in turn_complete.actions:
-            await self._emit_action_update(updater, turn, action)
+        for entry in purple_entries:
+            await self._emit_action_update(updater, turn, entry)
         
-        # Generate character responses
-        responses = await response_generator.process_turn_actions(turn_complete.actions)
+        # --- Response Generation: Collect new messages from modalities ---
+        # This gives us full message objects with thread_id, message_id, etc.
+        new_messages = await message_collector.collect(current_time)
         
-        # Schedule responses in UES
+        # Generate character responses to new messages
+        responses = await response_generator.process_new_messages(new_messages)
+        
+        # Schedule responses in UES (will fire on future time advances)
         for scheduled in responses:
             await self._schedule_response(scheduled)
         
-        # Advance simulation time
-        events_processed = await self._advance_time(turn_complete.time_step)
-        
         return TurnResult(
             turn_number=turn,
-            actions_taken=len(turn_complete.actions),
+            actions_taken=len(purple_entries),
             notes=turn_complete.notes,
             time_step=turn_complete.time_step,
             events_processed=events_processed,
@@ -1553,11 +2002,11 @@ class GreenAgent:
 | `_send_assessment_complete()` | Send `AssessmentCompleteMessage` to Purple |
 | `_build_results()` | Construct `AssessmentResults` from evaluation data |
 
-### 3.8 Green Agent Executor (`executor.py`)
+### 3.9 Green Agent Executor (`executor.py`)
 
 The executor is the entry point for A2A requests. It implements the `AgentExecutor`
 interface from the A2A SDK and is responsible for managing `GreenAgent` instances
-and routing assessment requests to them. Depends on `GreenAgent` (3.7) and
+and routing assessment requests to them. Depends on `GreenAgent` (3.8) and
 `ScenarioManager` (3.2). Uses `A2AClientWrapper` from `src/common/a2a/` for
 Purple agent communication.
 
@@ -1786,7 +2235,7 @@ class GreenAgentExecutor(AgentExecutor):
         self.agents.clear()
 ```
 
-### 3.9 Module Structure Summary
+### 3.10 Module Structure Summary
 
 ```
 src/green/
@@ -1794,10 +2243,11 @@ src/green/
 ├── server.py              # A2A server setup, agent card, entry point
 ├── llm_config.py          # 3.3 ✅ COMPLETE - LangChain LLM creation
 ├── action_log.py          # 3.4 ✅ COMPLETE - action log construction
-├── response_generator.py  # 3.5 ResponseGenerator - character response generation
-├── judge.py               # 3.6 CriteriaJudge - evaluation orchestration
-├── agent.py               # 3.7 GreenAgent - assessment orchestration, UES management
-├── executor.py            # 3.8 GreenAgentExecutor - request handling, agent lifecycle
+├── message_collector.py   # 3.5 ✅ COMPLETE - new message collection from UES
+├── response_generator.py  # 3.6 ResponseGenerator - character response generation
+├── judge.py               # 3.7 CriteriaJudge - evaluation orchestration
+├── agent.py               # 3.8 GreenAgent - assessment orchestration, UES management
+├── executor.py            # 3.9 GreenAgentExecutor - request handling, agent lifecycle
 └── scenarios/             # 3.2 ✅ COMPLETE - scenario schema and loading
     ├── __init__.py
     ├── schema.py
@@ -1808,13 +2258,14 @@ src/green/
 **Implementation Order** (dependencies flow upward):
 1. `llm_config.py` - No dependencies ✅ COMPLETE
 2. `action_log.py` - No dependencies ✅ COMPLETE
-3. `response_generator.py` - Depends on `llm_config.py`
-4. `judge.py` - Depends on `llm_config.py`
-5. `agent.py` - Depends on all of the above
-6. `executor.py` - Depends on `agent.py`, `scenarios/`, and `A2AClientWrapper` from `src/common/a2a/`
-7. `server.py` - Depends on `executor.py`
+3. `message_collector.py` - Depends on UES client ✅ COMPLETE
+4. `response_generator.py` - Depends on `llm_config.py`, `message_collector.py`
+5. `judge.py` - Depends on `llm_config.py`
+6. `agent.py` - Depends on all of the above
+7. `executor.py` - Depends on `agent.py`, `scenarios/`, and `A2AClientWrapper` from `src/common/a2a/`
+8. `server.py` - Depends on `executor.py`
 
-### 3.10 Data Flow Summary
+### 3.11 Data Flow Summary
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -2275,16 +2726,21 @@ ues-agentbeats/
 ### Week 2: Green Agent Core (Days 6-10) 🔄 IN PROGRESS
 - [x] Implement scenario schema and loader (141 tests)
 - [x] Create example scenario (email_triage_basic)
+- [x] Implement LLM configuration/factory (59 tests)
+- [x] Implement action log builder (20 tests)
+- [x] Implement new message collector (41 tests)
+- [x] Implement response generator with LLM integration (54 unit + 11 integration tests)
+- [x] Implement response data models (40 tests)
+- [x] Implement LLM prompt templates (29 tests)
 - [ ] Implement assessment orchestrator
 - [ ] Implement turn handler
-- [ ] Basic response generator (no LLM yet)
-- [ ] Basic criteria judge (no LLM yet)
-- [ ] Integration tests with mock UES
+- [ ] Implement criteria judge
 
-### Week 3: Green Agent LLM Integration (Days 11-14)
-- [ ] Integrate LangChain for response generation
+### Week 3: Green Agent LLM Integration (Days 11-14) ✅ COMPLETE (merged into Week 2)
+- [x] Integrate LangChain for response generation
+- [x] Implement LLM configuration/factory
+- [x] Integration tests with Ollama and OpenAI
 - [ ] Integrate LangChain for criteria judging
-- [ ] Implement LLM configuration/factory
 - [ ] Create first complete scenario
 
 ### Week 4: Purple Agent Template (Days 15-17)
@@ -2316,7 +2772,8 @@ ues-agentbeats/
 - LLM calls for judging use temperature=0
 
 ### Testing Strategy
-- Unit tests for all helper modules
+- Unit tests for all helper modules (768+ tests total)
+- Integration tests with real LLMs (Ollama and OpenAI)
 - Integration tests with mock A2A agents
 - End-to-end tests with actual UES instance
 - Docker build tests in CI
@@ -2330,4 +2787,4 @@ ues-agentbeats/
 ---
 
 *Document created: January 28, 2026*
-*For the AgentX AgentBeats Competition - Phase 1 deadline: January 31, 2026*
+*Last updated: January 29, 2026*

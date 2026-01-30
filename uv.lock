@@ -1356,8 +1356,8 @@ wheels = [
 
 [[package]]
 name = "ues"
-version = "0.1.0"
-source = { git = "https://github.com/JBoggsy/ues.git#0443b3043f96e5de71adbed341746986bd1456bf" }
+version = "0.2.1"
+source = { git = "https://github.com/JBoggsy/ues.git#c4403ac6cdc020977b577c86849565eb0123f2be" }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -1390,6 +1390,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -1406,6 +1407,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
+    { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0" },
     { name = "ues", git = "https://github.com/JBoggsy/ues.git" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]

@@ -38,7 +38,7 @@ def sample_character_data() -> dict[str, Any]:
     """Create sample character data for JSON files."""
     return {
         "name": "Alice Chen",
-        "role": "Manager",
+        "relationships": {"Alex Thompson": "direct report"},
         "personality": "Professional but friendly. Prefers concise communication.",
         "email": "alice.chen@company.com",
         "response_timing": {
@@ -816,7 +816,7 @@ class TestScenarioManagerIntegration:
             },
             "carol": {
                 "name": "Carol Davis",
-                "role": "Friend",
+                "relationships": {"Alex Thompson": "close friend"},
                 "personality": "Casual.",
                 "phone": "+1-555-123-4567",
                 "response_timing": {"base_delay": "PT5M", "variance": "PT2M"},

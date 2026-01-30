@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from src.common.agentbeats.results import (
     ALL_DIMENSIONS,
-    ActionLogEntryWithTurn,
+    ActionLogEntry,
     AssessmentResults,
     CriterionResult,
     DimensionScore,
@@ -79,9 +79,9 @@ def sample_criterion_result() -> CriterionResult:
 
 
 @pytest.fixture
-def sample_action_entry(sample_timestamp: datetime) -> ActionLogEntryWithTurn:
-    """Create a sample ActionLogEntryWithTurn for testing."""
-    return ActionLogEntryWithTurn(
+def sample_action_entry(sample_timestamp: datetime) -> ActionLogEntry:
+    """Create a sample ActionLogEntry for testing."""
+    return ActionLogEntry(
         turn=3,
         timestamp=sample_timestamp,
         action="email.send",
@@ -95,7 +95,7 @@ def sample_assessment_results(
     sample_timestamp: datetime,
 ) -> AssessmentResults:
     """Create a sample AssessmentResults for testing."""
-    action_entry = ActionLogEntryWithTurn(
+    action_entry = ActionLogEntry(
         turn=1,
         timestamp=sample_timestamp,
         action="email.archive",
@@ -359,16 +359,16 @@ class TestCriterionResult:
 
 
 # =============================================================================
-# ActionLogEntryWithTurn Tests
+# ActionLogEntry Tests
 # =============================================================================
 
 
-class TestActionLogEntryWithTurn:
-    """Tests for ActionLogEntryWithTurn model."""
+class TestActionLogEntry:
+    """Tests for ActionLogEntry model."""
 
-    def test_create_action_entry(self, sample_action_entry: ActionLogEntryWithTurn):
-        """Test creating an ActionLogEntryWithTurn with valid data."""
-        assert sample_action_entry.message_type == "action_log_entry_with_turn"
+    def test_create_action_entry(self, sample_action_entry: ActionLogEntry):
+        """Test creating an ActionLogEntry with valid data."""
+        assert sample_action_entry.message_type == "action_log_entry"
         assert sample_action_entry.turn == 3
         assert sample_action_entry.action == "email.send"
         assert sample_action_entry.success is True
@@ -376,7 +376,7 @@ class TestActionLogEntryWithTurn:
     def test_turn_must_be_positive(self, sample_timestamp: datetime):
         """Test that turn number must be >= 1."""
         with pytest.raises(ValidationError):
-            ActionLogEntryWithTurn(
+            ActionLogEntry(
                 turn=0,
                 timestamp=sample_timestamp,
                 action="test",
@@ -385,7 +385,7 @@ class TestActionLogEntryWithTurn:
 
     def test_failed_action_with_error(self, sample_timestamp: datetime):
         """Test creating a failed action with error message."""
-        entry = ActionLogEntryWithTurn(
+        entry = ActionLogEntry(
             turn=1,
             timestamp=sample_timestamp,
             action="email.send",
@@ -398,7 +398,7 @@ class TestActionLogEntryWithTurn:
 
     def test_parameters_default_to_empty_dict(self, sample_timestamp: datetime):
         """Test that parameters defaults to empty dict."""
-        entry = ActionLogEntryWithTurn(
+        entry = ActionLogEntry(
             turn=1,
             timestamp=sample_timestamp,
             action="email.read",
@@ -407,11 +407,11 @@ class TestActionLogEntryWithTurn:
         assert entry.parameters == {}
 
     def test_serialization_round_trip(
-        self, sample_action_entry: ActionLogEntryWithTurn
+        self, sample_action_entry: ActionLogEntry
     ):
         """Test JSON serialization and deserialization."""
         data = sample_action_entry.model_dump(mode="json")
-        restored = ActionLogEntryWithTurn.model_validate(data)
+        restored = ActionLogEntry.model_validate(data)
         assert restored.turn == sample_action_entry.turn
         assert restored.action == sample_action_entry.action
 
@@ -482,7 +482,7 @@ class TestAssessmentResults:
             overall=OverallScore(score=0, max_score=0),
             dimensions={},
         )
-        action_entry = ActionLogEntryWithTurn(
+        action_entry = ActionLogEntry(
             turn=1,
             timestamp=sample_timestamp,
             action="test",
@@ -653,8 +653,8 @@ class TestParseResult:
                 "max_score": 10,
                 "explanation": "Test",
             },
-            "action_log_entry_with_turn": {
-                "message_type": "action_log_entry_with_turn",
+            "action_log_entry": {
+                "message_type": "action_log_entry",
                 "turn": 1,
                 "timestamp": sample_timestamp.isoformat(),
                 "action": "test",
@@ -685,7 +685,7 @@ class TestResultTypeRegistry:
             "overall_score",
             "scores",
             "criterion_result",
-            "action_log_entry_with_turn",
+            "action_log_entry",
             "assessment_results",
         }
         assert set(RESULT_TYPE_REGISTRY.keys()) == expected_types

@@ -41,17 +41,46 @@ src/
 │   ├── a2a/          # A2A protocol helpers (complete)
 │   └── agentbeats/   # AgentBeats-specific utilities (complete)
 ├── green/            # Green agent implementation
+│   ├── scenarios/    # Scenario schema and loader (complete)
+│   ├── prompts/      # LLM prompt templates (complete)
+│   ├── action_log.py # Action log builder (complete)
+│   ├── llm_config.py # LLM factory (complete)
+│   ├── message_collector.py  # New message collector (complete)
+│   ├── response_models.py    # Response data models (complete)
+│   └── response_generator.py # Character response generation (complete)
 └── purple/           # Purple agent template
 scenarios/            # Assessment scenarios
-tests/                # Test suite
+tests/                # Test suite (768+ tests)
 docs/                 # Documentation
 ```
 
 ## Documentation
 
+**Design Documents:**
 - [Competition Description](docs/AGENTBEATS_COMPETITION_DESCRIPTION.md)
 - [Assessment Flow](docs/ASSESSMENT_FLOW.md)
 - [Implementation Plan](docs/IMPLEMENTATION_PLAN.md)
+- [Response Generation Design](docs/design/RESPONSE_GENERATION_DESIGN.md)
+
+**Module READMEs:**
+- [Green Agent Module](src/green/README.md)
+- [Scenario Management](src/green/scenarios/README.md)
+- [Response Prompts](src/green/prompts/README.md)
+- [A2A Helpers](src/common/a2a/README.md)
+- [AgentBeats Helpers](src/common/agentbeats/README.md)
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+# Required for OpenAI-based LLMs
+OPENAI_API_KEY=sk-your-key-here
+
+# Optional for other providers
+# ANTHROPIC_API_KEY=sk-ant-your-key-here
+# GOOGLE_API_KEY=your-key-here
+```
 
 ---
 
@@ -65,13 +94,18 @@ docs/                 # Documentation
 - [x] Write tests for serialization/validation (237 tests passing)
 
 ### Phase 3: Green Agent Implementation
-- [ ] Implement scenario schema and loader (`src/green/scenarios/`)
+- [x] Implement scenario schema and loader (`src/green/scenarios/`)
+- [x] Implement LLM configuration factory (`src/green/llm_config.py`)
+- [x] Implement action log builder (`src/green/action_log.py`)
+- [x] Implement new message collector (`src/green/message_collector.py`)
+- [x] Implement response generator (`src/green/response_generator.py`)
+- [x] Implement response data models (`src/green/response_models.py`)
+- [x] Implement LLM prompt templates (`src/green/prompts/`)
+- [x] Integrate LangChain for LLM-based response generation
+- [x] Write integration tests with Ollama and OpenAI
 - [ ] Implement assessment orchestrator (`src/green/assessment/orchestrator.py`)
 - [ ] Implement turn handler (`src/green/assessment/turn_handler.py`)
-- [ ] Implement response generator (`src/green/response_generator/`)
 - [ ] Implement criteria judge (`src/green/evaluation/`)
-- [ ] Integrate LangChain for LLM-based response generation
-- [ ] Integrate LangChain for LLM-based criteria judging
 - [ ] Create first complete scenario
 
 ### Phase 4: Purple Agent Template

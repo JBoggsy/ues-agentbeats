@@ -14,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from src.common.agentbeats.messages import (
-    ActionLogEntry,
     AgentBeatsMessage,
     AssessmentCompleteMessage,
     AssessmentStartMessage,
@@ -96,17 +95,6 @@ def sample_initial_state(
 def sample_timestamp() -> datetime:
     """Create a sample timezone-aware timestamp."""
     return datetime(2026, 1, 28, 12, 0, 0, tzinfo=timezone.utc)
-
-
-@pytest.fixture
-def sample_action_entry(sample_timestamp: datetime) -> ActionLogEntry:
-    """Create a sample ActionLogEntry for testing."""
-    return ActionLogEntry(
-        timestamp=sample_timestamp,
-        action="email.send",
-        parameters={"to": ["alice@example.com"], "subject": "Hello"},
-        success=True,
-    )
 
 
 # =============================================================================
@@ -387,51 +375,6 @@ class TestTurnStartMessage:
 
 
 # =============================================================================
-# ActionLogEntry Tests
-# =============================================================================
-
-
-class TestActionLogEntry:
-    """Tests for ActionLogEntry model."""
-
-    def test_create_successful_action(self, sample_action_entry: ActionLogEntry):
-        """Test creating a successful ActionLogEntry."""
-        assert sample_action_entry.message_type == "action_log_entry"
-        assert sample_action_entry.action == "email.send"
-        assert sample_action_entry.success is True
-        assert sample_action_entry.error_message is None
-
-    def test_create_failed_action(self, sample_timestamp: datetime):
-        """Test creating a failed ActionLogEntry."""
-        entry = ActionLogEntry(
-            timestamp=sample_timestamp,
-            action="email.send",
-            parameters={"to": ["invalid"]},
-            success=False,
-            error_message="Invalid email address",
-        )
-        assert entry.success is False
-        assert entry.error_message == "Invalid email address"
-
-    def test_parameters_default_to_empty_dict(self, sample_timestamp: datetime):
-        """Test that parameters defaults to empty dict."""
-        entry = ActionLogEntry(
-            timestamp=sample_timestamp,
-            action="email.read",
-            success=True,
-        )
-        assert entry.parameters == {}
-
-    def test_serialization_round_trip(self, sample_action_entry: ActionLogEntry):
-        """Test JSON serialization and deserialization."""
-        data = sample_action_entry.model_dump(mode="json")
-        restored = ActionLogEntry.model_validate(data)
-        assert restored.action == sample_action_entry.action
-        assert restored.parameters == sample_action_entry.parameters
-        assert restored.success == sample_action_entry.success
-
-
-# =============================================================================
 # TurnCompleteMessage Tests
 # =============================================================================
 
@@ -443,28 +386,21 @@ class TestTurnCompleteMessage:
         """Test creating a TurnCompleteMessage with minimal data."""
         msg = TurnCompleteMessage()
         assert msg.message_type == "turn_complete"
-        assert msg.actions == []
         assert msg.notes is None
         assert msg.time_step == "PT1H"
 
-    def test_create_turn_complete_with_actions(
-        self, sample_action_entry: ActionLogEntry
-    ):
-        """Test creating a TurnCompleteMessage with actions."""
+    def test_create_turn_complete_with_notes(self):
+        """Test creating a TurnCompleteMessage with notes."""
         msg = TurnCompleteMessage(
-            actions=[sample_action_entry],
             notes="Processed one email.",
             time_step="PT30M",
         )
-        assert len(msg.actions) == 1
-        assert msg.actions[0] == sample_action_entry
         assert msg.notes == "Processed one email."
         assert msg.time_step == "PT30M"
 
-    def test_serialization_round_trip(self, sample_action_entry: ActionLogEntry):
+    def test_serialization_round_trip(self):
         """Test JSON serialization and deserialization."""
         msg = TurnCompleteMessage(
-            actions=[sample_action_entry],
             notes="Test notes",
             time_step="PT2H",
         )
@@ -472,7 +408,6 @@ class TestTurnCompleteMessage:
         restored = TurnCompleteMessage.model_validate(data)
         assert restored.notes == msg.notes
         assert restored.time_step == msg.time_step
-        assert len(restored.actions) == len(msg.actions)
 
 
 # =============================================================================
@@ -625,16 +560,8 @@ class TestParseMessage:
                 "current_time": sample_timestamp.isoformat(),
                 "events_processed": 0,
             },
-            "action_log_entry": {
-                "message_type": "action_log_entry",
-                "timestamp": sample_timestamp.isoformat(),
-                "action": "test.action",
-                "parameters": {},
-                "success": True,
-            },
             "turn_complete": {
                 "message_type": "turn_complete",
-                "actions": [],
             },
             "assessment_complete": {
                 "message_type": "assessment_complete",
@@ -671,7 +598,6 @@ class TestMessageTypeRegistry:
             "initial_state_summary",
             "assessment_start",
             "turn_start",
-            "action_log_entry",
             "turn_complete",
             "assessment_complete",
             "early_completion",

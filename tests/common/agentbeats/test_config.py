@@ -263,7 +263,8 @@ class TestGreenAgentConfig:
         assert config.scenarios_dir == "scenarios"
         assert config.default_max_turns == 100
         assert config.default_turn_timeout == 300.0
-        assert config.response_generator_model == "gpt-4o"
+        assert config.response_generator_model == "gpt-4o-mini"
+        assert config.summarization_model == "gpt-4o-mini"
         assert config.evaluation_model == "gpt-4o"
 
     def test_explicit_values(self, clean_env: None) -> None:
@@ -275,6 +276,7 @@ class TestGreenAgentConfig:
             default_max_turns=50,
             default_turn_timeout=120.0,
             response_generator_model="gpt-4-turbo",
+            summarization_model="gpt-3.5-turbo",
             evaluation_model="claude-3-opus",
         )
 
@@ -284,6 +286,7 @@ class TestGreenAgentConfig:
         assert config.default_max_turns == 50
         assert config.default_turn_timeout == 120.0
         assert config.response_generator_model == "gpt-4-turbo"
+        assert config.summarization_model == "gpt-3.5-turbo"
         assert config.evaluation_model == "claude-3-opus"
 
     def test_max_turns_validation(self, clean_env: None) -> None:

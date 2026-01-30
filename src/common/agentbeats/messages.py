@@ -9,7 +9,6 @@ Message Types:
     - InitialStateSummary: Aggregates all modality summaries
     - AssessmentStartMessage: Green -> Purple at assessment start
     - TurnStartMessage: Green -> Purple at each turn start
-    - ActionLogEntry: Single action taken by Purple agent
     - TurnCompleteMessage: Purple -> Green when turn completes
     - AssessmentCompleteMessage: Green -> Purple when assessment ends
     - EarlyCompletionMessage: Purple -> Green to signal early completion
@@ -280,73 +279,21 @@ class TurnStartMessage(BaseModel):
     )
 
 
-class ActionLogEntry(BaseModel):
-    """Single action taken by Purple agent during a turn.
-
-    Purple agents report these in TurnCompleteMessage to document what actions
-    they performed. The Green agent uses these to build the assessment action
-    log and for evaluation purposes.
-
-    Attributes:
-        message_type: Fixed identifier for this message type.
-        timestamp: When the action was performed.
-        action: Action identifier (e.g., "email.send", "calendar.create").
-        parameters: Action-specific parameters.
-        success: Whether the action succeeded.
-        error_message: Error message if success=False.
-
-    Example:
-        >>> entry = ActionLogEntry(
-        ...     timestamp=datetime.now(tz=timezone.utc),
-        ...     action="email.send",
-        ...     parameters={"to": ["alice@example.com"], "subject": "Hello"},
-        ...     success=True
-        ... )
-        >>> entry.message_type
-        'action_log_entry'
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    message_type: Literal["action_log_entry"] = "action_log_entry"
-    timestamp: datetime = Field(..., description="When the action was performed")
-    action: str = Field(
-        ...,
-        description="Action identifier (e.g., 'email.send', 'calendar.create')",
-    )
-    parameters: dict[str, Any] = Field(
-        default_factory=dict, description="Action-specific parameters"
-    )
-    success: bool = Field(..., description="Whether the action succeeded")
-    error_message: str | None = Field(
-        default=None, description="Error message if success=False"
-    )
-
-
 class TurnCompleteMessage(BaseModel):
     """Message sent from Purple agent to Green agent when a turn completes.
 
-    Purple agents report all actions taken during the turn. The Green agent
-    uses this to build the assessment action log directly, rather than
-    reconstructing it from UES event history.
+    Purple agents send this message to signal that they have finished their
+    actions for the current turn. The Green agent will then advance simulation
+    time and query UES for executed events to build the action log.
 
     Attributes:
         message_type: Fixed identifier for this message type.
-        actions: List of actions performed during this turn.
         notes: Optional reasoning or transparency notes.
         time_step: Requested time advance (ISO 8601 duration, default "PT1H").
 
     Example:
         >>> msg = TurnCompleteMessage(
-        ...     actions=[
-        ...         ActionLogEntry(
-        ...             timestamp=datetime.now(tz=timezone.utc),
-        ...             action="email.archive",
-        ...             parameters={"email_id": "123"},
-        ...             success=True
-        ...         )
-        ...     ],
-        ...     notes="Archived spam email.",
+        ...     notes="Replied to urgent emails and updated calendar.",
         ...     time_step="PT30M"
         ... )
         >>> msg.message_type
@@ -356,9 +303,6 @@ class TurnCompleteMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     message_type: Literal["turn_complete"] = "turn_complete"
-    actions: list[ActionLogEntry] = Field(
-        default_factory=list, description="Actions performed this turn"
-    )
     notes: str | None = Field(
         default=None, description="Optional reasoning or transparency notes"
     )
@@ -431,7 +375,6 @@ AgentBeatsMessage = Union[
     InitialStateSummary,
     AssessmentStartMessage,
     TurnStartMessage,
-    ActionLogEntry,
     TurnCompleteMessage,
     AssessmentCompleteMessage,
     EarlyCompletionMessage,
@@ -446,7 +389,6 @@ MESSAGE_TYPE_REGISTRY: dict[str, type[BaseModel]] = {
     "initial_state_summary": InitialStateSummary,
     "assessment_start": AssessmentStartMessage,
     "turn_start": TurnStartMessage,
-    "action_log_entry": ActionLogEntry,
     "turn_complete": TurnCompleteMessage,
     "assessment_complete": AssessmentCompleteMessage,
     "early_completion": EarlyCompletionMessage,

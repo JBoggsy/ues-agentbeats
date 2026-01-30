@@ -9,7 +9,7 @@ Models:
     - DimensionScore: Aggregated score for a scoring dimension
     - OverallScore: Overall assessment score
     - Scores: Container for all scores
-    - ActionLogEntryWithTurn: Action log entry with turn context
+    - ActionLogEntry: Action log entry with turn context (built from UES events)
     - AssessmentResults: Complete assessment results artifact
 
 Scoring Dimensions:
@@ -289,23 +289,24 @@ class CriterionResult(BaseModel):
 # =============================================================================
 
 
-class ActionLogEntryWithTurn(BaseModel):
-    """Action log entry with turn context added by Green agent.
+class ActionLogEntry(BaseModel):
+    """Action log entry for assessment results.
 
-    This extends the ActionLogEntry from messages.py with the turn number
-    that the Green agent adds when building the assessment results.
+    The Green agent builds the action log by querying UES for executed events
+    after each turn. Only events from the Purple agent (identified by agent_id)
+    are included in the assessment results action log.
 
     Attributes:
         message_type: Fixed identifier for this message type.
-        turn: The turn number when this action was taken.
-        timestamp: When the action was performed.
-        action: Action identifier (e.g., "email.send", "calendar.create").
-        parameters: Action-specific parameters.
-        success: Whether the action succeeded.
-        error_message: Error message if success=False.
+        turn: The turn number when this action was executed.
+        timestamp: When the action was performed (event executed_at time).
+        action: Action identifier derived from event modality and data.
+        parameters: Action-specific parameters from event data.
+        success: Whether the action succeeded (event status).
+        error_message: Error message if the event failed.
 
     Example:
-        >>> entry = ActionLogEntryWithTurn(
+        >>> entry = ActionLogEntry(
         ...     turn=3,
         ...     timestamp=datetime.now(tz=timezone.utc),
         ...     action="email.send",
@@ -318,7 +319,7 @@ class ActionLogEntryWithTurn(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    message_type: Literal["action_log_entry_with_turn"] = "action_log_entry_with_turn"
+    message_type: Literal["action_log_entry"] = "action_log_entry"
     turn: int = Field(..., ge=1, description="Turn number (1-indexed)")
     timestamp: datetime = Field(..., description="When the action was performed")
     action: str = Field(
@@ -396,7 +397,7 @@ class AssessmentResults(BaseModel):
     criteria_results: list[CriterionResult] = Field(
         ..., description="Results for each criterion"
     )
-    action_log: list[ActionLogEntryWithTurn] = Field(
+    action_log: list[ActionLogEntry] = Field(
         ..., description="Complete action log"
     )
 
@@ -432,7 +433,7 @@ RESULT_TYPE_REGISTRY: dict[str, type[BaseModel]] = {
     "overall_score": OverallScore,
     "scores": Scores,
     "criterion_result": CriterionResult,
-    "action_log_entry_with_turn": ActionLogEntryWithTurn,
+    "action_log_entry": ActionLogEntry,
     "assessment_results": AssessmentResults,
 }
 

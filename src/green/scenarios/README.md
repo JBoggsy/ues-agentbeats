@@ -29,7 +29,7 @@ src/green/scenarios/
 ### Schema Models (`schema.py`)
 
 - **`ResponseTiming`**: Timing configuration for character responses (base delay + variance)
-- **`CharacterProfile`**: Profile for a simulated character (name, role, personality, contact methods)
+- **`CharacterProfile`**: Profile for a simulated character (name, relationships, personality, contact methods)
 - **`EvaluationCriterion`**: Single evaluation criterion (programmatic or LLM-based)
 - **`ScenarioConfig`**: Complete scenario configuration
 
@@ -85,7 +85,7 @@ print(f"User: {user_profile.name} ({user_profile.email})")
 
 # Access all characters
 for char_id, character in config.characters.items():
-    print(f"{char_id}: {character.name} ({character.role})")
+    print(f"{char_id}: {character.name} (relationships: {character.relationships})")
 
 # Get criteria by dimension
 accuracy_criteria = config.get_criteria_by_dimension("accuracy")
@@ -132,7 +132,7 @@ scenarios/
   "characters": {
     "alex": {
       "name": "Alex Thompson",
-      "role": "Main Character",
+      "relationships": {},
       "personality": "A busy professional relying on their AI assistant.",
       "email": "alex@example.com",
       "response_timing": {
@@ -142,7 +142,9 @@ scenarios/
     },
     "alice": {
       "name": "Alice Chen",
-      "role": "Manager",
+      "relationships": {
+        "Alex Thompson": "direct report"
+      },
       "personality": "Professional but friendly.",
       "email": "alice@example.com",
       "response_timing": {
@@ -170,7 +172,7 @@ scenarios/
 
 The `user_character` field is required and must reference a key in the `characters` dictionary. This designates which character represents the user that the Purple agent is assisting.
 
-By convention, the user character should have the role `"Main Character"` to clearly identify them in the scenario configuration. The user character's profile defines their email, phone, and other contact information that the Purple agent will use when acting on their behalf.
+The user character typically has an empty `relationships` dict (since relationships are defined from other characters' perspectives). The user character's profile defines their email, phone, and other contact information that the Purple agent will use when acting on their behalf.
 
 ```python
 # Access the user character profile in code

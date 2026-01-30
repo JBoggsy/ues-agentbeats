@@ -36,8 +36,8 @@ if TYPE_CHECKING:
     # Avoid circular import - these types are only needed for type hints
     from ues.client import AsyncUESClient
 
-    # Forward reference for ActionLogEntryWithTurn from results module
-    from src.common.agentbeats.results import ActionLogEntryWithTurn
+    # Forward reference for ActionLogEntry from results module
+    from src.common.agentbeats.results import ActionLogEntry
 
 
 # =============================================================================
@@ -115,7 +115,7 @@ class AgentBeatsEvalContext:
 
     client: AsyncUESClient
     scenario_config: dict[str, Any]
-    action_log: list[ActionLogEntryWithTurn]
+    action_log: list[ActionLogEntry]
     initial_state: dict[str, Any]
     final_state: dict[str, Any]
     user_prompt: str
@@ -297,7 +297,9 @@ class CharacterProfile(BaseModel):
 
     Attributes:
         name: The character's display name.
-        role: The character's relationship to the user (e.g., "Boss", "Friend").
+        relationships: Mapping of character names to relationship descriptions.
+            Describes this character's relationships to other characters in the
+            scenario (e.g., {"Alex": "direct report", "Bob": "team member"}).
         personality: Description of the character's personality and communication style.
         email: The character's email address (if they communicate via email).
         phone: The character's phone number (if they communicate via SMS).
@@ -309,7 +311,7 @@ class CharacterProfile(BaseModel):
         >>> from datetime import timedelta
         >>> character = CharacterProfile(
         ...     name="Alice Chen",
-        ...     role="Manager",
+        ...     relationships={"Alex Thompson": "direct report"},
         ...     personality="Professional but friendly. Prefers concise communication.",
         ...     email="alice.chen@company.com",
         ...     response_timing=ResponseTiming(base_delay="PT15M", variance="PT5M"),
@@ -326,11 +328,9 @@ class CharacterProfile(BaseModel):
         max_length=200,
         description="Character's display name",
     )
-    role: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="Character's relationship to user (e.g., 'Boss', 'Friend')",
+    relationships: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping of character name to relationship description",
     )
     personality: str = Field(
         ...,

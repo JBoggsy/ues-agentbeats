@@ -173,20 +173,27 @@ This document details the A2A protocol interaction flow for the UES Green Agent 
 │     - etc.                                                                   │
 │                                                                              │
 │  2. Purple → Green (A2A): turn_complete                                      │
-│     { actions: [...], notes: "..." }                                         │
+│     { notes: "...", time_step: "PT1H" }                                      │
 │                                                                              │
-│  3. Green: Runs response generator sub-agents for character replies          │
+│  3. Green: Advances simulation time by time_step, processes events           │
 │                                                                              │
-│  4. Green: Advances simulation time by time_step, processes events           │
+│  4. Green: Queries UES for action log AND new messages:                      │
+│     - Events: Query event log for Purple agent actions (for scoring)         │
+│     - Messages: Query modality states for new emails/SMS/calendar events     │
+│       (for response generation with full message objects)                    │
 │                                                                              │
-│  5. Green → Purple (A2A): turn_start                                         │
+│  5. Green: Runs response generator for new messages                          │
+│     (replies to Purple emails/SMS, but also responds to character-initiated  │
+│      messages that appeared during time advancement)                         │
+│                                                                              │
+│  6. Green → Purple (A2A): turn_start                                         │
 │     {                                                                        │
 │       turn_number: 2,                                                        │
 │       current_time: "2026-01-22T10:00:00Z",                                  │
 │       events_processed: 3                                                    │
 │     }                                                                        │
 │                                                                              │
-│  6. Repeat until termination condition                                       │
+│  7. Repeat until termination condition                                       │
 └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
                                     │
                                     ▼
@@ -207,7 +214,7 @@ This document details the A2A protocol interaction flow for the UES Green Agent 
 |-----------|--------------|---------|
 | Green → Purple | `assessment_start` | UES URL, API key, assessment_instructions (fixed string), current time, initial state summary |
 | Green → Purple | `turn_start` | Turn number, current time, events_processed count |
-| Purple → Green | `turn_complete` | List of actions taken (ActionLogEntry[]), optional notes, time_step |
+| Purple → Green | `turn_complete` | Optional notes, optional time_step |
 | Green → Purple | `assessment_complete` | Reason for completion |
 | Purple → Green | `early_completion` | Purple signals it's done early |
 
@@ -281,41 +288,17 @@ Note: Chat has no "unread" concept (it models user-assistant conversations). The
 **TurnCompleteMessage**
 ```json
 {
-  "actions": [
-    {
-      "timestamp": "2026-01-22T09:05:30Z",
-      "action": "email.reply",
-      "parameters": { "email_id": "email-123", "body": "Thanks for reaching out..." },
-      "success": true,
-      "error_message": null
-    },
-    {
-      "timestamp": "2026-01-22T09:06:15Z",
-      "action": "email.archive",
-      "parameters": { "email_id": "email-456" },
-      "success": true,
-      "error_message": null
-    },
-    {
-      "timestamp": "2026-01-22T09:07:00Z",
-      "action": "email.label",
-      "parameters": { "email_id": "email-789", "label": "follow-up" },
-      "success": true,
-      "error_message": null
-    }
-  ],
   "notes": "Replied to 2 urgent emails, archived 1 spam thread",
   "time_step": "PT1H"
 }
 ```
-- `actions`: List of `ActionLogEntry` objects representing all actions taken during the turn. Purple agent is responsible for accurately logging all actions.
 - `notes`: Optional free-form text for agent reasoning/transparency. Logged in action history and may factor into evaluation scoring.
 - `time_step`: ISO 8601 duration format (e.g., "PT1H" = 1 hour, "PT30M" = 30 minutes) indicating how much time should advance. If omitted, Green uses scenario default.
 
-The Green agent builds the assessment action log directly from these `TurnCompleteMessage` reports, adding turn numbers to each entry. This approach:
-- Ensures Purple agent is responsible for accurate action reporting
-- Simplifies Green agent implementation (no need to reconstruct actions from UES events)
-- Gives Purple agent control over action naming and categorization
+**Note on Action Tracking**: The Green agent builds the action log by querying the UES event log after time advances, filtering for events attributed to the Purple agent. This approach:
+- Ensures accurate, tamper-proof action recording
+- Captures all actions regardless of Purple agent's reporting
+- Uses UES event attribution (via agent_id) to distinguish Purple vs Green actions
 
 **TurnStartMessage**
 ```json
@@ -342,7 +325,7 @@ The Green agent builds the assessment action log directly from these `TurnComple
 
 ## 4.1 Response Generator Sub-agents
 
-A critical responsibility of the Green Agent is managing **response generator sub-agents** that create realistic character responses to Purple Agent actions. This transforms the simulation from a static environment into a dynamic, interactive world.
+A critical responsibility of the Green Agent is managing **response generator sub-agents** that create realistic character responses to events that occur during the assessment. This transforms the simulation from a static environment into a dynamic, interactive world.
 
 ### Why Response Generation Matters
 
@@ -364,28 +347,65 @@ With response generation, scenarios can test:
 │                    Response Generation (Between Turns)                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. Purple completes turn → Green receives turn_complete with action list    │
+│  1. Purple completes turn → Green receives turn_complete                     │
 │                                                                              │
-│  2. Green scans Purple's reported actions for outgoing messages:             │
-│     • Actions like "email.send", "email.reply" to character addresses        │
-│     • Actions like "sms.send" to character phone numbers or group chats      │
-│     • Actions like "calendar.create" with character attendees                │
+│  2. Green advances simulation time by time_step                              │
 │                                                                              │
-│  3. For each detected message action, Response Generator Sub-agent:          │
-│     a) Evaluates if message warrants a response (see below)                  │
-│     b) If no response needed → skip (conversation ends naturally)            │
-│     c) If response needed:                                                   │
-│        - Loads character profile from scenario definition                    │
-│        - Retrieves conversation context (thread history from UES)            │
-│        - Generates in-character response via LLM                             │
-│        - Schedules response event with character-appropriate delay           │
+│  3. Green queries UES for new data:                                          │
+│     a) Event log: Get Purple agent actions (for action log / scoring)        │
+│     b) Modality states: Get new messages since last check                    │
+│        - Email: client.email.query(received_after=last_check_time)           │
+│        - SMS: client.sms.query(sent_after=last_check_time)                   │
+│        - Calendar: Compare event IDs to find newly created events            │
 │                                                                              │
-│  4. Green advances simulation time                                           │
+│  4. For each new message (Email, SMSMessage, CalendarEvent objects):         │
+│     a) Extract all recipients from the message object                        │
+│     b) For each recipient that's a scenario character (excluding sender):    │
+│        - Check if response is warranted (via LLM)                            │
+│        - If yes: generate in-character response, schedule with delay         │
 │                                                                              │
-│  5. Scheduled responses fire → appear in Purple's next state query           │
+│  5. Green sends turn_start to Purple → Scheduled responses fire when         │
+│     Purple's next turn completes and time advances                           │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Message Sources for Response Generation
+
+The response generator queries UES modality states directly for new messages.
+This gives full message objects with `message_id`, `thread_id`, and all fields
+needed for contextual response generation.
+
+**Query strategies by modality:**
+- **Email**: `client.email.query(received_after=last_check_time)` → `list[Email]`
+- **SMS**: `client.sms.query(sent_after=last_check_time)` → `list[SMSMessage]`
+- **Calendar**: Query all events, compare IDs to find new ones → `list[CalendarEvent]`
+
+**Why query modalities instead of the event log?**
+1. Events may not include `message_id` or `thread_id` needed for thread history
+2. Full message objects provide all fields (body, subject, attachments, etc.)
+3. More efficient than scanning all events for response-triggering actions
+
+For each new message, the response generator extracts all recipients and checks
+if any character (other than the sender) should respond. This unified approach handles:
+- Purple sending to characters → characters may reply
+- Scheduled character messages → other CC'd characters may respond
+- Calendar invites → attendees may RSVP
+
+**Note**: The action log is still built from UES events (for accurate scoring and
+audit), but response generation uses modality queries for rich message data.
+
+### Agent Attribution
+
+Events are attributed to agents via the `agent_id` field in UES event responses:
+- **Purple Agent ID**: Actions taken by Purple through the UES REST API
+- **Green Agent ID**: Events scheduled by the response generator
+- **null/empty**: Pre-scheduled events from scenario setup
+
+The Green agent uses this attribution to:
+- Build the action log (Purple events only)
+- Avoid responding to its own responses (infinite loop prevention)
+- Track which character interactions were agent-initiated vs scenario-initiated
 
 ### Response Necessity Check
 
@@ -412,28 +432,36 @@ Each scenario defines characters with profiles that control response behavior:
 ```json
 {
   "characters": {
-    "jamie.walsh@email.com": {
+    "jamie_walsh": {
       "name": "Jamie Walsh",
-      "role": "Friend",
+      "relationships": {
+        "Alex Thompson": "close friend",
+        "Sam Rivera": "mutual friend"
+      },
       "personality": "Casual and friendly, uses lots of exclamation points",
+      "email": "jamie.walsh@email.com",
       "response_timing": {
         "base_delay": "PT2H",
         "variance": "PT30M"
       },
-      "rsvp_behavior": "quick_yes",
       "special_instructions": "Always offers to help with setup"
     },
-    "orders@coastalcatering.com": {
+    "coastal_catering": {
       "name": "Coastal Catering",
-      "role": "Vendor",
+      "relationships": {
+        "Alex Thompson": "customer contact"
+      },
       "personality": "Professional, slightly formal, focused on upselling",
+      "email": "orders@coastalcatering.com",
       "response_timing": {
         "base_delay": "PT4H",
         "variance": "PT2H"
       },
-      "pricing": {
-        "base_per_person": 25,
-        "negotiation_floor": 20
+      "config": {
+        "pricing": {
+          "base_per_person": 25,
+          "negotiation_floor": 20
+        }
       }
     }
   }
@@ -608,10 +636,10 @@ Scenario designers control dimension weighting by allocating more or fewer point
 }
 ```
 
-**Note**: The `action_log` is built directly from Purple agent's `TurnCompleteMessage` reports. The Green agent adds turn numbers to each entry as it processes turn completions. This means:
-- Purple is responsible for accurately reporting all actions it takes
-- Action naming conventions are determined by Purple agent implementation
-- Failed actions should include an `error_message` for debugging
+**Note**: The `action_log` is built by the Green agent from UES event history, filtered to include only events attributed to the Purple agent (via `agent_id`). Turn numbers are added as each turn's events are processed. This approach:
+- Provides accurate, tamper-proof action recording
+- Captures all Purple actions regardless of reporting
+- Uses UES's native event attribution for reliable filtering
 
 ### Score Calculation
 

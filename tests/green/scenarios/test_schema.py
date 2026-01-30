@@ -41,7 +41,7 @@ def sample_character(sample_response_timing: ResponseTiming) -> CharacterProfile
     """Create a sample CharacterProfile for testing."""
     return CharacterProfile(
         name="Alice Chen",
-        role="Manager",
+        relationships={"Alex Thompson": "direct report"},
         personality="Professional but friendly. Prefers concise communication.",
         email="alice.chen@company.com",
         response_timing=sample_response_timing,
@@ -53,7 +53,7 @@ def sample_character_with_phone(sample_response_timing: ResponseTiming) -> Chara
     """Create a sample CharacterProfile with phone for testing."""
     return CharacterProfile(
         name="Bob Smith",
-        role="Friend",
+        relationships={"Alex Thompson": "close friend"},
         personality="Casual and humorous. Enjoys long conversations.",
         phone="+1-555-123-4567",
         response_timing=sample_response_timing,
@@ -250,7 +250,7 @@ class TestCharacterProfile:
     def test_create_with_email(self, sample_character: CharacterProfile):
         """Test creating a CharacterProfile with email."""
         assert sample_character.name == "Alice Chen"
-        assert sample_character.role == "Manager"
+        assert sample_character.relationships == {"Alex Thompson": "direct report"}
         assert sample_character.email == "alice.chen@company.com"
         assert sample_character.phone is None
 
@@ -268,7 +268,7 @@ class TestCharacterProfile:
         """Test creating a CharacterProfile with both email and phone."""
         character = CharacterProfile(
             name="Carol Davis",
-            role="Colleague",
+            relationships={"Alex Thompson": "colleague", "Alice Chen": "team lead"},
             personality="Balanced and helpful.",
             email="carol@example.com",
             phone="+1-555-999-0000",
@@ -284,7 +284,6 @@ class TestCharacterProfile:
         with pytest.raises(ValidationError) as exc_info:
             CharacterProfile(
                 name="Nobody",
-                role="Ghost",
                 personality="Doesn't exist.",
                 response_timing=sample_response_timing,
             )
@@ -294,7 +293,7 @@ class TestCharacterProfile:
         """Test optional fields."""
         character = CharacterProfile(
             name="Test",
-            role="Tester",
+            relationships={"User": "tester"},
             personality="Testing.",
             email="test@test.com",
             response_timing=sample_response_timing,
@@ -309,7 +308,6 @@ class TestCharacterProfile:
         with pytest.raises(ValidationError) as exc_info:
             CharacterProfile(
                 name="",
-                role="Test",
                 personality="Test.",
                 email="test@test.com",
                 response_timing=sample_response_timing,
@@ -321,7 +319,6 @@ class TestCharacterProfile:
         with pytest.raises(ValidationError) as exc_info:
             CharacterProfile(
                 name="A" * 201,
-                role="Test",
                 personality="Test.",
                 email="test@test.com",
                 response_timing=sample_response_timing,

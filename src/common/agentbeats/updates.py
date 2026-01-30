@@ -23,7 +23,7 @@ Update Types:
     - AssessmentCompletedUpdate: Assessment has ended
     - ErrorOccurredUpdate: An error occurred
     - ActionObservedUpdate: Logs a Purple agent action (emitted by Green when
-        processing TurnCompleteMessage)
+        processing UES events attributed to Purple agent)
 
 Design Note:
     All update models include a `message_type` field with a fixed literal string
@@ -392,10 +392,10 @@ class ErrorOccurredUpdate(BaseModel):
 class ActionObservedUpdate(BaseModel):
     """Update emitted by the Green agent when logging a Purple agent action.
 
-    The Green agent emits this update when processing a TurnCompleteMessage
-    from the Purple agent. For each ActionLogEntry in the message, the Green
-    agent emits one ActionObservedUpdate. This ensures all Purple agent actions
-    are logged consistently without requiring Purple agents to emit updates.
+    The Green agent emits this update after processing UES events from each turn.
+    For each event attributed to the Purple agent (identified by agent_id), the
+    Green agent creates an ActionLogEntry and emits one ActionObservedUpdate.
+    This ensures all Purple agent actions are logged consistently.
 
     The fields mirror ActionLogEntry to ensure complete information capture.
 
@@ -876,8 +876,8 @@ class TaskUpdateEmitter:
     ) -> TaskStatusUpdateEvent:
         """Emit an action observed update.
 
-        The Green agent calls this method for each ActionLogEntry in a
-        TurnCompleteMessage received from the Purple agent. This ensures
+        The Green agent calls this method for each ActionLogEntry created
+        from UES events attributed to the Purple agent. This ensures
         all Purple agent actions are logged for debugging and audit.
 
         Args:

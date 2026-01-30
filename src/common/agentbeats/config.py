@@ -257,7 +257,10 @@ class GreenAgentConfig(AgentBeatsConfig):
         scenarios_dir: Directory containing scenario definitions.
         default_max_turns: Default maximum turns if not specified in scenario.
         default_turn_timeout: Default timeout per turn in seconds.
-        response_generator_model: LLM model for generating character responses.
+        response_generator_model: LLM model for should-respond checks and
+            response generation during character simulations.
+        summarization_model: LLM model for summarizing long thread histories.
+            Can be a cheaper/faster model than response_generator_model.
         evaluation_model: LLM model for evaluating Purple agent performance.
 
     Example:
@@ -271,7 +274,8 @@ class GreenAgentConfig(AgentBeatsConfig):
         AGENTBEATS_GREEN_VERBOSE_UPDATES: Enable/disable verbose updates
         AGENTBEATS_GREEN_UES_BASE_PORT: Base port for UES servers
         AGENTBEATS_GREEN_SCENARIOS_DIR: Scenarios directory path
-        AGENTBEATS_GREEN_RESPONSE_GENERATOR_MODEL: LLM for responses
+        AGENTBEATS_GREEN_RESPONSE_GENERATOR_MODEL: LLM for should-respond and response generation
+        AGENTBEATS_GREEN_SUMMARIZATION_MODEL: LLM for thread summarization
         AGENTBEATS_GREEN_EVALUATION_MODEL: LLM for evaluation
     """
 
@@ -316,8 +320,12 @@ class GreenAgentConfig(AgentBeatsConfig):
         description="Default timeout per turn in seconds",
     )
     response_generator_model: str = Field(
-        default="gpt-4o",
-        description="LLM model for generating character responses",
+        default="gpt-4o-mini",
+        description="LLM model for should-respond checks and response generation",
+    )
+    summarization_model: str = Field(
+        default="gpt-4o-mini",
+        description="LLM model for summarizing long thread histories (can be cheaper/faster)",
     )
     evaluation_model: str = Field(
         default="gpt-4o",
@@ -376,7 +384,14 @@ class GreenAgentConfig(AgentBeatsConfig):
             type=str,
             default=None,
             dest="response_generator_model",
-            help="LLM model for generating character responses",
+            help="LLM model for should-respond checks and response generation",
+        )
+        parser.add_argument(
+            "--summarization-model",
+            type=str,
+            default=None,
+            dest="summarization_model",
+            help="LLM model for summarizing thread histories",
         )
         parser.add_argument(
             "--evaluation-model",
@@ -399,6 +414,7 @@ class GreenAgentConfig(AgentBeatsConfig):
                 "default_max_turns": parsed.default_max_turns,
                 "default_turn_timeout": parsed.default_turn_timeout,
                 "response_generator_model": parsed.response_generator_model,
+                "summarization_model": parsed.summarization_model,
                 "evaluation_model": parsed.evaluation_model,
             }
         )

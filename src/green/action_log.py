@@ -1,44 +1,39 @@
 """Action log builder for Green agent assessments.
 
 This module provides a helper class for building the assessment action log from
-Purple agent turn reports. The builder tracks turn numbers and converts
-`ActionLogEntry` objects (from TurnCompleteMessage) to `ActionLogEntryWithTurn`
-objects that include turn context.
+UES event history. The builder tracks turn numbers and converts UES EventResponse
+objects to ActionLogEntry objects that include turn context.
 
-The ActionLogBuilder has no dependencies on other Green agent modules, making
-it easy to test and reuse.
+The action log only includes events from the Purple agent (identified by agent_id).
+Events from the Green agent (character responses, scheduled events) are tracked
+separately for observability but not included in the assessment action log.
 
 Classes:
-    ActionLogBuilder: Builder for assessment action logs.
+    ActionLogBuilder: Builder for assessment action logs from UES events.
 
 Example:
     >>> from datetime import datetime, timezone
-    >>> from src.common.agentbeats.messages import ActionLogEntry
     >>> from src.green.action_log import ActionLogBuilder
     >>>
-    >>> builder = ActionLogBuilder()
+    >>> builder = ActionLogBuilder(purple_agent_id="purple-agent-123")
     >>> builder.start_turn(1)
     >>>
-    >>> entry = ActionLogEntry(
-    ...     timestamp=datetime.now(tz=timezone.utc),
-    ...     action="email.send",
-    ...     parameters={"to": ["alice@example.com"]},
-    ...     success=True
-    ... )
-    >>> builder.add_action(entry)
+    >>> # After time advances, process executed events from UES
+    >>> events = [...]  # EventResponse objects from client.events.list_events()
+    >>> builder.add_events_from_turn(events)
     >>> builder.end_turn()
     >>>
     >>> log = builder.get_log()
-    >>> len(log)
-    1
-    >>> log[0].turn
-    1
+    >>> len(log)  # Only Purple agent events are in the log
+    3
 """
 
 from __future__ import annotations
 
-from src.common.agentbeats.messages import ActionLogEntry
-from src.common.agentbeats.results import ActionLogEntryWithTurn
+from datetime import datetime
+from typing import Any
+
+from src.common.agentbeats.results import ActionLogEntry
 
 
 class ActionLogBuilderError(Exception):
@@ -55,7 +50,7 @@ class InvalidTurnStateError(ActionLogBuilderError):
     """Raised when an operation is performed in an invalid turn state.
 
     This error is raised when:
-    - `add_action()` is called without an active turn
+    - `add_events_from_turn()` is called without an active turn
     - `start_turn()` is called while a turn is already active
     - `end_turn()` is called without an active turn
 
@@ -93,28 +88,28 @@ class InvalidTurnNumberError(ActionLogBuilderError):
 
 
 class ActionLogBuilder:
-    """Builder for assessment action logs.
+    """Builder for assessment action logs from UES events.
 
-    This class accumulates action log entries across turns, tracking the current
-    turn number and converting ActionLogEntry objects to ActionLogEntryWithTurn
-    objects. The builder ensures proper turn sequencing and provides methods to
-    retrieve statistics about the logged actions.
+    This class accumulates action log entries across turns by processing UES
+    events. It filters events to only include those from the Purple agent
+    (identified by agent_id) for the assessment action log.
 
     The builder follows a strict lifecycle:
     1. Call `start_turn(turn_number)` to begin a new turn
-    2. Call `add_action(entry)` for each action in the turn (zero or more)
+    2. Call `add_events_from_turn(events)` with executed UES events
     3. Call `end_turn()` to complete the turn
     4. Repeat steps 1-3 for additional turns
-    5. Call `get_log()` to retrieve all entries
+    5. Call `get_log()` to retrieve all Purple agent entries
 
     Use `reset()` to clear all entries and start fresh for a new assessment.
 
     Attributes:
+        purple_agent_id: The agent_id used to identify Purple agent events.
         current_turn: The current turn number (0 if no turn has started).
         is_turn_active: Whether a turn is currently active.
 
     Example:
-        >>> builder = ActionLogBuilder()
+        >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
         >>> builder.current_turn
         0
         >>> builder.is_turn_active
@@ -126,12 +121,31 @@ class ActionLogBuilder:
         1
     """
 
-    def __init__(self) -> None:
-        """Initialize an empty action log builder."""
-        self._entries: list[ActionLogEntryWithTurn] = []
+    def __init__(self, purple_agent_id: str) -> None:
+        """Initialize an action log builder.
+
+        Args:
+            purple_agent_id: The agent_id used to identify Purple agent events
+                in UES. Only events with this agent_id will be included in the
+                assessment action log.
+        """
+        self._purple_agent_id = purple_agent_id
+        self._entries: list[ActionLogEntry] = []
         self._current_turn: int = 0
         self._is_turn_active: bool = False
         self._actions_in_current_turn: int = 0
+        # Track all events (including Green agent) for statistics
+        self._total_events_processed: int = 0
+        self._green_events_count: int = 0
+
+    @property
+    def purple_agent_id(self) -> str:
+        """Return the Purple agent ID used for filtering events.
+
+        Returns:
+            The agent_id string used to identify Purple agent events.
+        """
+        return self._purple_agent_id
 
     @property
     def current_turn(self) -> int:
@@ -161,7 +175,7 @@ class ActionLogBuilder:
         """Start a new turn.
 
         Turn numbers must be sequential starting from 1. This method must be
-        called before adding any actions for the turn.
+        called before adding any events for the turn.
 
         Args:
             turn_number: The turn number to start (must be current_turn + 1).
@@ -172,7 +186,7 @@ class ActionLogBuilder:
                 current_turn + 1 and >= 1).
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.start_turn(1)
             >>> builder.current_turn
             1
@@ -207,17 +221,17 @@ class ActionLogBuilder:
     def end_turn(self) -> int:
         """End the current turn.
 
-        This method must be called after all actions for the turn have been
+        This method must be called after all events for the turn have been
         added.
 
         Returns:
-            The number of actions added during this turn.
+            The number of Purple agent actions added during this turn.
 
         Raises:
             InvalidTurnStateError: If no turn is currently active.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.start_turn(1)
             >>> actions_count = builder.end_turn()
             >>> actions_count
@@ -234,109 +248,128 @@ class ActionLogBuilder:
         self._is_turn_active = False
         return self._actions_in_current_turn
 
-    def add_action(self, entry: ActionLogEntry) -> ActionLogEntryWithTurn:
-        """Add an action to the current turn.
+    def add_events_from_turn(
+        self,
+        events: list[dict[str, Any]],
+    ) -> tuple[list[ActionLogEntry], list[dict[str, Any]]]:
+        """Add events from UES to the current turn.
 
-        Converts the ActionLogEntry to an ActionLogEntryWithTurn by adding the
-        current turn number.
+        Processes a list of UES EventResponse objects (as dicts) and adds
+        Purple agent events to the action log. Returns both the Purple agent
+        entries added and the Green agent events (for observability).
 
         Args:
-            entry: The action log entry to add.
+            events: List of UES EventResponse objects as dictionaries. Each
+                should have at least: event_id, scheduled_time, modality,
+                status, executed_at, data, and optionally agent_id.
 
         Returns:
-            The converted ActionLogEntryWithTurn object.
+            A tuple of (purple_entries, green_events) where:
+                - purple_entries: ActionLogEntry objects added to the log
+                - green_events: Event dicts from the Green agent (not logged)
 
         Raises:
             InvalidTurnStateError: If no turn is currently active.
 
         Example:
-            >>> from datetime import datetime, timezone
-            >>> from src.common.agentbeats.messages import ActionLogEntry
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.start_turn(1)
-            >>> entry = ActionLogEntry(
-            ...     timestamp=datetime.now(tz=timezone.utc),
-            ...     action="email.read",
-            ...     parameters={"email_id": "123"},
-            ...     success=True
-            ... )
-            >>> result = builder.add_action(entry)
-            >>> result.turn
+            >>> events = [
+            ...     {"event_id": "e1", "modality": "email", "status": "executed",
+            ...      "executed_at": "2026-01-28T10:00:00Z", "data": {"action": "send"},
+            ...      "agent_id": "purple-123"},
+            ...     {"event_id": "e2", "modality": "email", "status": "executed",
+            ...      "executed_at": "2026-01-28T10:05:00Z", "data": {"action": "receive"},
+            ...      "agent_id": "green-456"},
+            ... ]
+            >>> purple, green = builder.add_events_from_turn(events)
+            >>> len(purple)  # Only Purple agent event
             1
-            >>> result.action
-            'email.read'
+            >>> len(green)  # Green agent event returned separately
+            1
         """
         if not self._is_turn_active:
             raise InvalidTurnStateError(
-                "Cannot add action: no turn is currently active. "
+                "Cannot add events: no turn is currently active. "
                 "Call start_turn() first."
             )
 
-        entry_with_turn = ActionLogEntryWithTurn(
-            turn=self._current_turn,
-            timestamp=entry.timestamp,
-            action=entry.action,
-            parameters=entry.parameters,
-            success=entry.success,
-            error_message=entry.error_message,
-        )
+        purple_entries: list[ActionLogEntry] = []
+        green_events: list[dict[str, Any]] = []
 
-        self._entries.append(entry_with_turn)
-        self._actions_in_current_turn += 1
+        for event in events:
+            self._total_events_processed += 1
+            agent_id = event.get("agent_id")
 
-        return entry_with_turn
+            if agent_id == self._purple_agent_id:
+                # Purple agent event - add to action log
+                entry = self._convert_event_to_entry(event)
+                self._entries.append(entry)
+                purple_entries.append(entry)
+                self._actions_in_current_turn += 1
+            else:
+                # Green agent or system event - track but don't log
+                green_events.append(event)
+                self._green_events_count += 1
 
-    def add_actions(self, entries: list[ActionLogEntry]) -> list[ActionLogEntryWithTurn]:
-        """Add multiple actions to the current turn.
+        return purple_entries, green_events
 
-        Convenience method that calls `add_action()` for each entry. All entries
-        are added with the current turn number.
+    def _convert_event_to_entry(self, event: dict[str, Any]) -> ActionLogEntry:
+        """Convert a UES EventResponse dict to an ActionLogEntry.
 
         Args:
-            entries: List of action log entries to add.
+            event: UES EventResponse as a dictionary.
 
         Returns:
-            List of converted ActionLogEntryWithTurn objects.
-
-        Raises:
-            InvalidTurnStateError: If no turn is currently active.
-
-        Example:
-            >>> from datetime import datetime, timezone
-            >>> from src.common.agentbeats.messages import ActionLogEntry
-            >>> builder = ActionLogBuilder()
-            >>> builder.start_turn(1)
-            >>> entries = [
-            ...     ActionLogEntry(
-            ...         timestamp=datetime.now(tz=timezone.utc),
-            ...         action="email.read",
-            ...         parameters={},
-            ...         success=True
-            ...     ),
-            ...     ActionLogEntry(
-            ...         timestamp=datetime.now(tz=timezone.utc),
-            ...         action="email.archive",
-            ...         parameters={},
-            ...         success=True
-            ...     ),
-            ... ]
-            >>> results = builder.add_actions(entries)
-            >>> len(results)
-            2
+            ActionLogEntry with turn context.
         """
-        return [self.add_action(entry) for entry in entries]
+        # Extract action from modality and data
+        modality = event.get("modality", "unknown")
+        data = event.get("data", {})
+        action_type = data.get("action", "unknown")
+        action = f"{modality}.{action_type}"
 
-    def get_log(self) -> list[ActionLogEntryWithTurn]:
+        # Determine success from status
+        status = event.get("status", "unknown")
+        success = status == "executed"
+        error_message = event.get("error_message") if not success else None
+
+        # Get timestamp from executed_at or scheduled_time
+        timestamp_str = event.get("executed_at") or event.get("scheduled_time")
+        if isinstance(timestamp_str, str):
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+        elif isinstance(timestamp_str, datetime):
+            timestamp = timestamp_str
+        else:
+            # Fallback to current time if no timestamp available
+            from datetime import timezone
+
+            timestamp = datetime.now(tz=timezone.utc)
+
+        # Extract parameters from data (excluding 'action' key)
+        parameters = {k: v for k, v in data.items() if k != "action"}
+
+        return ActionLogEntry(
+            turn=self._current_turn,
+            timestamp=timestamp,
+            action=action,
+            parameters=parameters,
+            success=success,
+            error_message=error_message,
+        )
+
+    def get_log(self) -> list[ActionLogEntry]:
         """Return a copy of the action log.
 
-        Returns a new list containing all action log entries. The returned list
-        is a shallow copy; the entries themselves are immutable (frozen).
+        Returns a new list containing all Purple agent action log entries.
+        The returned list is a shallow copy; the entries themselves are
+        immutable (frozen).
 
         Returns:
-            List of all ActionLogEntryWithTurn objects added so far.
+            List of all ActionLogEntry objects from the Purple agent.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> log = builder.get_log()
             >>> len(log)
             0
@@ -344,97 +377,111 @@ class ActionLogBuilder:
         return list(self._entries)
 
     def get_total_actions(self) -> int:
-        """Return the total number of actions logged across all turns.
+        """Return the total number of Purple agent actions logged.
 
         Returns:
-            Total number of actions.
+            Total number of Purple agent actions across all turns.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.get_total_actions()
             0
         """
         return len(self._entries)
 
     def get_successful_actions(self) -> int:
-        """Return the number of successful actions.
+        """Return the number of successful Purple agent actions.
 
         Returns:
             Number of actions where success=True.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.get_successful_actions()
             0
         """
         return sum(1 for entry in self._entries if entry.success)
 
     def get_failed_actions(self) -> int:
-        """Return the number of failed actions.
+        """Return the number of failed Purple agent actions.
 
         Returns:
             Number of actions where success=False.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.get_failed_actions()
             0
         """
         return sum(1 for entry in self._entries if not entry.success)
 
-    def get_actions_by_turn(self, turn_number: int) -> list[ActionLogEntryWithTurn]:
-        """Return all actions for a specific turn.
+    def get_actions_by_turn(self, turn_number: int) -> list[ActionLogEntry]:
+        """Return all Purple agent actions for a specific turn.
 
         Args:
             turn_number: The turn number to filter by.
 
         Returns:
-            List of actions taken during the specified turn.
+            List of Purple agent actions taken during the specified turn.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.get_actions_by_turn(1)
             []
         """
         return [entry for entry in self._entries if entry.turn == turn_number]
 
-    def get_actions_by_type(self, action_type: str) -> list[ActionLogEntryWithTurn]:
-        """Return all actions of a specific type.
+    def get_actions_by_type(self, action_type: str) -> list[ActionLogEntry]:
+        """Return all Purple agent actions of a specific type.
 
         Args:
             action_type: The action type to filter by (e.g., "email.send").
 
         Returns:
-            List of actions matching the specified type.
+            List of Purple agent actions matching the specified type.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.get_actions_by_type("email.send")
             []
         """
         return [entry for entry in self._entries if entry.action == action_type]
 
+    def get_total_events_processed(self) -> int:
+        """Return the total number of events processed (all agents).
+
+        Returns:
+            Total events processed including both Purple and Green agents.
+
+        Example:
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
+            >>> builder.get_total_events_processed()
+            0
+        """
+        return self._total_events_processed
+
+    def get_green_events_count(self) -> int:
+        """Return the number of Green agent events processed.
+
+        Returns:
+            Number of events from the Green agent (not in action log).
+
+        Example:
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
+            >>> builder.get_green_events_count()
+            0
+        """
+        return self._green_events_count
+
     def reset(self) -> None:
         """Reset the builder for a new assessment.
 
         Clears all entries and resets the turn counter to 0. Any active turn
-        is also ended.
+        is also ended. The purple_agent_id is preserved.
 
         Example:
-            >>> from datetime import datetime, timezone
-            >>> from src.common.agentbeats.messages import ActionLogEntry
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> builder.start_turn(1)
-            >>> entry = ActionLogEntry(
-            ...     timestamp=datetime.now(tz=timezone.utc),
-            ...     action="email.read",
-            ...     parameters={},
-            ...     success=True
-            ... )
-            >>> builder.add_action(entry)
-            ActionLogEntryWithTurn(...)
-            >>> builder.get_total_actions()
-            1
             >>> builder.reset()
             >>> builder.current_turn
             0
@@ -447,15 +494,17 @@ class ActionLogBuilder:
         self._current_turn = 0
         self._is_turn_active = False
         self._actions_in_current_turn = 0
+        self._total_events_processed = 0
+        self._green_events_count = 0
 
     def __len__(self) -> int:
-        """Return the total number of actions logged.
+        """Return the total number of Purple agent actions logged.
 
         Returns:
-            Total number of actions.
+            Total number of Purple agent actions.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> len(builder)
             0
         """
@@ -468,7 +517,7 @@ class ActionLogBuilder:
             String representation showing current state.
 
         Example:
-            >>> builder = ActionLogBuilder()
+            >>> builder = ActionLogBuilder(purple_agent_id="purple-123")
             >>> repr(builder)
             'ActionLogBuilder(turn=0, actions=0, active=False)'
         """

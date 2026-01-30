@@ -6,11 +6,11 @@
   "end_time": "2026-01-28T17:00:00Z",
   "default_time_step": "PT1H",
   "user_prompt": "Please help me manage my inbox today. I need you to:\n1. Review all unread emails and prioritize them\n2. Respond to any urgent messages from my manager (Alice Chen)\n3. Archive newsletters and promotional emails\n4. Flag emails that require my personal attention\n\nPlease be professional in all communications and keep me informed of any important updates.",
-  "user_character": "alex_user",
+  "user_character": "alex_thompson",
   "characters": {
-    "alex_user": {
+    "alex_thompson": {
       "name": "Alex Thompson",
-      "role": "Main Character",
+      "relationships": {},
       "personality": "A busy professional who relies on their AI assistant to help manage communications. Prefers to be kept informed of important matters but trusts the assistant to handle routine tasks.",
       "email": "alex.thompson@company.com",
       "response_timing": {
@@ -21,7 +21,10 @@
     },
     "alice_chen": {
       "name": "Alice Chen",
-      "role": "Manager",
+      "relationships": {
+        "Alex Thompson": "direct report",
+        "Bob Wilson": "team member"
+      },
       "personality": "Professional and direct. Values concise, clear communication. Expects prompt responses to urgent matters but is understanding about response times for routine items. Appreciates when you acknowledge receipt of important messages.",
       "email": "alice.chen@company.com",
       "response_timing": {
@@ -32,7 +35,10 @@
     },
     "bob_wilson": {
       "name": "Bob Wilson",
-      "role": "Colleague",
+      "relationships": {
+        "Alex Thompson": "colleague",
+        "Alice Chen": "manager"
+      },
       "personality": "Friendly and collaborative. Sometimes sends longer emails with multiple questions. Appreciates detailed responses but is patient.",
       "email": "bob.wilson@company.com",
       "response_timing": {
@@ -42,7 +48,7 @@
     },
     "newsletter": {
       "name": "TechNews Weekly",
-      "role": "Newsletter",
+      "relationships": {},
       "personality": "Automated newsletter. Sends weekly tech updates. No responses expected or handled.",
       "email": "newsletter@technews.example.com",
       "response_timing": {
@@ -53,7 +59,9 @@
     },
     "support_vendor": {
       "name": "Acme Corp Support",
-      "role": "Vendor",
+      "relationships": {
+        "Alex Thompson": "customer contact"
+      },
       "personality": "Professional support team. Responds to inquiries about orders and services. May require follow-up for complex issues.",
       "email": "support@acmecorp.example.com",
       "response_timing": {
