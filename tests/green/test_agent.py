@@ -816,28 +816,109 @@ class TestResponseScheduling:
 class TestResultBuilding:
     """Tests for result building methods."""
 
-    def test_build_results_raises_not_implemented(
+    def test_build_results_returns_assessment_results(
         self,
         mock_scenario: MagicMock,
     ) -> None:
-        """_build_results() should raise NotImplementedError (stubbed)."""
+        """_build_results() should return a valid AssessmentResults."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
             scores = Scores(
                 overall=OverallScore(score=10, max_score=20),
                 dimensions={"accuracy": DimensionScore(score=10, max_score=20)},
             )
-            with pytest.raises(NotImplementedError):
-                agent._build_results(
-                    assessment_id="assess-123",
-                    scenario=mock_scenario,
-                    scores=scores,
-                    criteria_results=[],
-                    action_log=[],
-                    turns_completed=5,
-                    duration=100.0,
-                    status="completed",
-                )
+            criterion_result = CriterionResult(
+                criterion_id="test-criterion",
+                name="Test Criterion",
+                dimension="accuracy",
+                score=10,
+                max_score=20,
+                explanation="Test passed",
+            )
+            action_entry = ActionLogEntry(
+                turn=1,
+                timestamp=datetime.now(timezone.utc),
+                action="email.send",
+                parameters={"to": ["test@example.com"]},
+                success=True,
+            )
+
+            result = agent._build_results(
+                assessment_id="assess-123",
+                scenario=mock_scenario,
+                scores=scores,
+                criteria_results=[criterion_result],
+                action_log=[action_entry],
+                turns_completed=5,
+                duration=100.0,
+                status="completed",
+                participant="http://purple.example.com",
+            )
+
+            assert isinstance(result, AssessmentResults)
+            assert result.assessment_id == "assess-123"
+            assert result.scenario_id == mock_scenario.scenario_id
+            assert result.participant == "http://purple.example.com"
+            assert result.status == "completed"
+            assert result.duration_seconds == 100.0
+            assert result.turns_taken == 5
+            assert result.actions_taken == 1
+            assert result.scores == scores
+            assert len(result.criteria_results) == 1
+            assert len(result.action_log) == 1
+
+    def test_build_results_maps_cancelled_to_failed(
+        self,
+        mock_scenario: MagicMock,
+    ) -> None:
+        """_build_results() should map 'cancelled' status to 'failed'."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            scores = Scores(
+                overall=OverallScore(score=0, max_score=20),
+                dimensions={"accuracy": DimensionScore(score=0, max_score=20)},
+            )
+
+            result = agent._build_results(
+                assessment_id="assess-456",
+                scenario=mock_scenario,
+                scores=scores,
+                criteria_results=[],
+                action_log=[],
+                turns_completed=2,
+                duration=50.0,
+                status="cancelled",
+                participant="http://purple.example.com",
+            )
+
+            assert result.status == "failed"
+
+    def test_build_results_empty_action_log(
+        self,
+        mock_scenario: MagicMock,
+    ) -> None:
+        """_build_results() should handle empty action log."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            scores = Scores(
+                overall=OverallScore(score=5, max_score=10),
+                dimensions={"efficiency": DimensionScore(score=5, max_score=10)},
+            )
+
+            result = agent._build_results(
+                assessment_id="assess-789",
+                scenario=mock_scenario,
+                scores=scores,
+                criteria_results=[],
+                action_log=[],
+                turns_completed=0,
+                duration=10.0,
+                status="completed",
+                participant="http://purple.example.com",
+            )
+
+            assert result.actions_taken == 0
+            assert len(result.action_log) == 0
 
 
 # =============================================================================
