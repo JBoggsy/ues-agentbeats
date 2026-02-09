@@ -610,11 +610,23 @@ field validation, configuration merging, and validation warnings.
 
 ---
 
-## Phase 3: Green Agent Implementation
+## Phase 3: Green Agent Implementation 🔄 IN PROGRESS
 
 **Location**: `src/green/`
 
 The Green Agent orchestrates assessments, manages UES, and evaluates Purple agents.
+
+**Phase 3 Status Summary**:
+- 3.1 Architecture Overview — design complete
+- 3.2 Scenario Management — ✅ COMPLETE (141 tests)
+- 3.3 LLM Configuration — ✅ COMPLETE (59 tests)
+- 3.4 Action Log Builder — ✅ COMPLETE (20 tests)
+- 3.5 New Message Collector — ✅ COMPLETE (41 tests)
+- 3.6 Response Generation — ✅ COMPLETE (54 unit + 11 integration tests)
+- 3.7 Criteria Judge — ✅ COMPLETE
+- 3.8 Green Agent (`agent.py`) — 🔄 IN PROGRESS (18/22 methods, 3,628 lines of tests)
+- 3.9 Green Agent Executor — not started
+- 3.10 Module Structure — updated
 
 ### 3.1 Architecture Overview
 
@@ -1565,10 +1577,49 @@ dimensions = judge.get_dimensions()
 - `evaluation/models.py`: `LLMEvaluationResult` Pydantic model for structured LLM output
 - `evaluation/prompts.py`: Prompt templates and context builders for LLM evaluation
 
-### 3.8 Green Agent (`agent.py`)
+### 3.8 Green Agent (`agent.py`) 🔄 IN PROGRESS
 
 The `GreenAgent` class is the high-level orchestrator for assessments. Each instance
 owns its own UES server and can run multiple sequential assessments (one per task).
+
+**Status**: 18 of 22 methods implemented. See [GREEN_AGENT_DESIGN_PLAN.md](design/GREEN_AGENT_DESIGN_PLAN.md) § 16.2 for detailed step tracking.
+
+**Implemented methods** (✅):
+- `cancel()` — cancellation flag logic
+- `run()` — full 5-phase assessment lifecycle with error handling
+- `_run_turn()` — turn orchestration (send TurnStart, wait for response, process end-of-turn)
+- `_process_turn_end()` — batch event processing, response generation, two-phase time advance
+- `_send_and_wait_purple()` — A2A message send with blocking wait
+- `_extract_response_data()` — parse DataPart from Task/Message responses
+- `_send_assessment_start()` — send AssessmentStartMessage to Purple
+- `_send_assessment_complete()` — send AssessmentCompleteMessage to Purple
+- `_create_user_api_key()` — create user-level API key via UES `/keys` endpoint
+- `_revoke_user_api_key()` — revoke API key (ignores 404)
+- `_setup_ues()` — clear state, import scenario, start simulation
+- `_capture_state_snapshot()` — parallel query of all 5 modality states
+- `_build_initial_state_summary()` — build InitialStateSummary from UES state
+- `_count_events_today()` — count calendar events for current simulation date
+- `_schedule_response()` — dispatch to modality-specific scheduler
+- `_schedule_email_response()` — inject email via `ues_client.email.receive()`
+- `_schedule_sms_response()` — inject SMS via `ues_client.sms.receive()`
+- `_schedule_calendar_response()` — inject RSVP via `ues_client.calendar.respond_to_event()`
+
+**Remaining stubs** (❌ `raise NotImplementedError`):
+- `__init__()` — constructor (wiring UESServerManager, LLMFactory, config)
+- `startup()` — UES server start, client creation, health wait
+- `shutdown()` — UES server stop, client cleanup
+- `_advance_time()` — parse ISO 8601 duration, call `ues_client.time.advance()`
+- `_advance_remainder()` — compute remainder duration, advance
+- `_build_results()` — assemble AssessmentResults from scores/action log
+- `_check_ues_health()` — process + HTTP health check
+
+**Tests added** (3,628 lines across 6 files):
+- `test_agent.py` (972 lines) — unit tests for run/turn/cancel
+- `test_agent_api_keys.py` (456 lines) — API key CRUD
+- `test_agent_purple_comm.py` (507 lines) — A2A communication
+- `test_agent_ues_setup.py` (321 lines) — UES scenario setup
+- `test_response_scheduling.py` (370 lines) — response scheduling
+- `test_agent_integration.py` (1,002 lines) — integration tests
 
 **Responsibilities:**
 1. Own and manage UES server lifecycle (startup/shutdown)
@@ -2202,28 +2253,50 @@ class GreenAgentExecutor(AgentExecutor):
 ```
 src/green/
 ├── __init__.py
-├── server.py              # A2A server setup, agent card, entry point
-├── llm_config.py          # 3.3 ✅ COMPLETE - LangChain LLM creation
-├── action_log.py          # 3.4 ✅ COMPLETE - action log construction
-├── message_collector.py   # 3.5 ✅ COMPLETE - new message collection from UES
-├── response_generator.py  # 3.6 ResponseGenerator - character response generation
-├── judge.py               # 3.7 CriteriaJudge - evaluation orchestration
-├── agent.py               # 3.8 GreenAgent - assessment orchestration, UES management
-├── executor.py            # 3.9 GreenAgentExecutor - request handling, agent lifecycle
+├── README.md
+├── agent.py               # 3.8 🔄 IN PROGRESS - assessment orchestration, UES management
+├── assessment/
+│   ├── __init__.py
+│   └── models.py          # TurnResult, EndOfTurnResult ✅ COMPLETE
+├── core/
+│   ├── __init__.py
+│   ├── action_log.py      # 3.4 ✅ COMPLETE - action log construction
+│   ├── llm_config.py      # 3.3 ✅ COMPLETE - LangChain LLM creation
+│   ├── message_collector.py # 3.5 ✅ COMPLETE - new message collection from UES
+│   └── ues_server.py      # UESServerManager ✅ COMPLETE
+├── evaluation/
+│   ├── __init__.py
+│   ├── judge.py           # 3.7 ✅ COMPLETE - CriteriaJudge evaluation orchestration
+│   ├── models.py          # LLMEvaluationResult
+│   └── prompts.py         # Prompt templates for LLM evaluation
+├── response/
+│   ├── __init__.py
+│   ├── generator.py       # 3.6 ✅ COMPLETE - ResponseGenerator
+│   ├── models.py          # ScheduledResponse ✅ COMPLETE
+│   └── prompts.py         # Prompt templates for response generation
 └── scenarios/             # 3.2 ✅ COMPLETE - scenario schema and loading
     ├── __init__.py
     ├── schema.py
     ├── loader.py
     └── README.md
+
+tests/green/
+├── test_agent.py                   # GreenAgent unit tests (972 lines) ✅ NEW
+├── test_agent_api_keys.py          # API key management tests (456 lines) ✅ NEW
+├── test_agent_integration.py       # Integration tests (1,002 lines) ✅ NEW
+├── test_agent_purple_comm.py       # Purple communication tests (507 lines) ✅ NEW
+├── test_agent_ues_setup.py         # UES setup tests (321 lines) ✅ NEW
+├── test_response_scheduling.py     # Response scheduling tests (370 lines) ✅ NEW
+└── ... (existing test files)
 ```
 
 **Implementation Order** (dependencies flow upward):
-1. `llm_config.py` - No dependencies ✅ COMPLETE
-2. `action_log.py` - No dependencies ✅ COMPLETE
-3. `message_collector.py` - Depends on UES client ✅ COMPLETE
-4. `response_generator.py` - Depends on `llm_config.py`, `message_collector.py`
-5. `judge.py` - Depends on `llm_config.py`
-6. `agent.py` - Depends on all of the above
+1. `core/llm_config.py` - No dependencies ✅ COMPLETE
+2. `core/action_log.py` - No dependencies ✅ COMPLETE
+3. `core/message_collector.py` - Depends on UES client ✅ COMPLETE
+4. `response/generator.py` - Depends on `llm_config.py`, `message_collector.py` ✅ COMPLETE
+5. `evaluation/judge.py` - Depends on `llm_config.py` ✅ COMPLETE
+6. `agent.py` - Depends on all of the above 🔄 IN PROGRESS (18/22 methods implemented)
 7. `executor.py` - Depends on `agent.py`, `scenarios/`, and `A2AClientWrapper` from `src/common/a2a/`
 8. `server.py` - Depends on `executor.py`
 
@@ -2705,15 +2778,26 @@ ues-agentbeats/
 - [x] Implement response generator with LLM integration (54 unit + 11 integration tests)
 - [x] Implement response data models (40 tests)
 - [x] Implement LLM prompt templates (29 tests)
-- [ ] Implement assessment orchestrator
-- [ ] Implement turn handler
-- [ ] Implement criteria judge
+- [x] Implement assessment orchestrator (`run()`, `cancel()`) — implemented via code swarm
+- [x] Implement turn handler (`_run_turn()`, `_process_turn_end()`) — implemented via code swarm
+- [x] Implement criteria judge
+- [x] Implement Purple communication (`_send_and_wait_purple`, `_extract_response_data`, `_send_assessment_start`, `_send_assessment_complete`) — implemented via code swarm
+- [x] Implement API key management (`_create_user_api_key`, `_revoke_user_api_key`) — implemented via code swarm
+- [x] Implement UES setup (`_setup_ues`) — implemented via code swarm
+- [x] Implement state management (`_capture_state_snapshot`, `_build_initial_state_summary`, `_count_events_today`) — implemented via code swarm
+- [x] Implement response scheduling (`_schedule_response` and variants) — implemented via code swarm
+- [x] Write unit tests for GreenAgent (4 test files, ~2,305 lines) — implemented via code swarm
+- [x] Write integration tests for GreenAgent (~1,002 lines) — implemented via code swarm
+- [ ] Implement `__init__()`, `startup()`, `shutdown()` (still stubs)
+- [ ] Implement `_advance_time()`, `_advance_remainder()` (still stubs)
+- [ ] Implement `_build_results()` (still stub)
+- [ ] Implement `_check_ues_health()` (still stub)
 
 ### Week 3: Green Agent LLM Integration (Days 11-14) ✅ COMPLETE (merged into Week 2)
 - [x] Integrate LangChain for response generation
 - [x] Implement LLM configuration/factory
 - [x] Integration tests with Ollama and OpenAI
-- [ ] Integrate LangChain for criteria judging
+- [x] Integrate LangChain for criteria judging
 - [ ] Create first complete scenario
 
 ### Week 4: Purple Agent Template (Days 15-17)
