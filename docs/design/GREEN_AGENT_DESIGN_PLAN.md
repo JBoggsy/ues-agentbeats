@@ -1517,11 +1517,11 @@ src/green/
 | 12 | Implement `__init__()`, `startup()`, `shutdown()` | UESServerManager, LLMFactory | ❌ Stub |
 | 13 | Implement `_advance_time()`, `_advance_remainder()` | UES time API | ❌ Stub |
 | 14 | Implement `_build_results()` | AssessmentResults | ❌ Stub |
-| 15 | Implement `_check_ues_health()` | UES health endpoint | ❌ Stub |
+| 15 | ~~Implement `_check_ues_health()`~~ | UES health endpoint | ✅ Done |
 | 16 | ~~Write unit tests~~ | pytest, mocking | ✅ Done (4 files, ~2,305 lines) |
 | 17 | ~~Write integration tests~~ | Real UES instance | ✅ Done (1 file, ~1,002 lines) |
 
-**Progress**: 13/17 steps complete. 4 methods remain as stubs.
+**Progress**: 14/17 steps complete. 3 methods remain as stubs.
 
 ### 16.3 Testing Strategy
 
