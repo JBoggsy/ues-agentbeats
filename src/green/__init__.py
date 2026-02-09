@@ -23,6 +23,7 @@ Example:
     >>> config = manager.load_scenario("email_triage_basic")
 """
 
+from src.green.agent import GreenAgent
 from src.green.core import (
     ActionLogBuilder,
     ActionLogBuilderError,
@@ -50,6 +51,8 @@ from src.green.scenarios import (
 )
 
 __all__ = [
+    # GreenAgent orchestrator
+    "GreenAgent",
     # Core infrastructure
     "ActionLogBuilder",
     "ActionLogBuilderError",
