@@ -394,7 +394,69 @@ class GreenAgent:
             ``EndOfTurnResult`` with counts of actions, events, and
             responses generated.
         """
-        raise NotImplementedError
+        # == Phase 1: Apply advance — advance by 1s to apply Purple's events ==
+        apply_result = await self._advance_time("PT1S")
+
+        # Get time after apply advance
+        time_state = await self.ues_client.time.get_state()
+        apply_time = time_state.current_time
+
+        # == Phase 2: Collect and process events ==
+        action_log_builder.start_turn(turn)
+
+        events = await self.ues_client.events.list_events(
+            start_time=turn_start_time,
+            end_time=apply_time,
+            status="executed",
+        )
+
+        purple_entries, _green_events = action_log_builder.add_events_from_turn(
+            [e.model_dump() if hasattr(e, "model_dump") else e for e in events.events]
+        )
+        action_log_builder.end_turn()
+
+        # Emit action updates for observability
+        for entry in purple_entries:
+            await emitter.action_observed(
+                turn_number=turn,
+                timestamp=entry.timestamp,
+                action=entry.action,
+                parameters=entry.parameters,
+                success=entry.success,
+                error_message=entry.error_message,
+            )
+
+        # == Phase 3: Collect new messages ==
+        new_messages = await message_collector.collect(apply_time)
+
+        # == Phase 4: Generate character responses ==
+        responses = await response_generator.process_new_messages(
+            new_messages=new_messages,
+            current_time=apply_time,
+        )
+
+        # == Phase 5: Schedule responses in UES ==
+        for scheduled in responses:
+            await self._schedule_response(scheduled)
+
+        await emitter.responses_generated(
+            turn_number=turn,
+            responses_count=len(responses),
+            characters_involved=[r.character_name for r in responses],
+        )
+
+        # == Phase 6: Remainder advance — advance by (time_step - 1s) ==
+        remainder_result = await self._advance_remainder(
+            time_step=time_step, apply_seconds=1
+        )
+
+        return EndOfTurnResult(
+            actions_taken=len(purple_entries),
+            total_events=(
+                apply_result.events_executed + remainder_result.events_executed
+            ),
+            responses_generated=len(responses),
+        )
 
     # ------------------------------------------------------------------
     # Time management (private)
