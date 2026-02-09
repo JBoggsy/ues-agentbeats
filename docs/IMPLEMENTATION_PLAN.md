@@ -485,28 +485,30 @@ class ActionObservedUpdate(BaseModel):
 class TaskUpdateEmitter:
     """Helper for emitting structured task updates as A2A events.
     
-    Used by the Green agent to emit all task updates during assessment.
+    Takes a TaskUpdater from the A2A SDK and provides typed convenience methods
+    for emitting AgentBeats-specific updates. Methods are async and actually
+    send updates via the TaskUpdater.
     """
     
-    def __init__(self, task_id: str, context_id: str): ...
+    def __init__(self, updater: TaskUpdater) -> None: ...
     
-    def assessment_started(
+    async def assessment_started(
         self,
         assessment_id: str,
         scenario_id: str,
         participant_url: str,
         start_time: datetime,
-    ) -> TaskStatusUpdateEvent: ...
+    ) -> None: ...
     
-    def turn_completed(
+    async def turn_completed(
         self,
         turn_number: int,
         actions_taken: int,
         time_advanced: str,
         early_completion_requested: bool = False,
-    ) -> TaskStatusUpdateEvent: ...
+    ) -> None: ...
     
-    def assessment_completed(
+    async def assessment_completed(
         self,
         reason: Literal["scenario_complete", "early_completion", "timeout", "error"],
         total_turns: int,
@@ -514,10 +516,10 @@ class TaskUpdateEmitter:
         duration_seconds: float,
         overall_score: int,
         max_score: int,
-    ) -> TaskStatusUpdateEvent: ...
+    ) -> None: ...
     
     # Called when processing UES events from Purple agent
-    def action_observed(
+    async def action_observed(
         self,
         turn_number: int,
         timestamp: datetime,
@@ -526,7 +528,7 @@ class TaskUpdateEmitter:
         success: bool,
         error_message: str | None = None,
         notes: str | None = None,
-    ) -> TaskStatusUpdateEvent: ...
+    ) -> None: ...
     
     # ... more convenience methods
 
@@ -1827,11 +1829,13 @@ class GreenAgent:
         A turn consists of:
         1. Send TurnStartMessage to Purple
         2. Wait for TurnCompleteMessage (or EarlyCompletionMessage)
-        3. Advance simulation time
+        3a. Advance simulation time by 1 second (apply Purple's events)
         4. Query UES events for action log (Purple agent actions)
         5. Collect new messages from modalities (for response generation)
         6. Generate character responses to new messages
-        7. Schedule responses in UES (will fire on next time advance)
+        7. Schedule responses in UES
+        3b. Advance simulation time by remainder (time_step - 1s) to fire
+            character responses before Purple's next turn
         
         Args:
             turn: Current turn number (1-indexed).
@@ -1878,18 +1882,20 @@ class GreenAgent:
         
         turn_complete = TurnCompleteMessage.model_validate(response_data)
         
-        # Advance simulation time FIRST (scheduled events fire during this)
-        events_processed = await self._advance_time(turn_complete.time_step)
+        # == Step 3a: Apply advance — advance by 1s to apply Purple's events ==
+        # This ensures Purple's scheduled events (emails sent, calendar events
+        # created, etc.) are applied and visible in UES modality state.
+        apply_events = await self._advance_time("PT1S")
         
-        # Get the new current time after advancement
+        # Get time after apply advance
         time_state = await self.ues_client.time.get_state()
-        current_time = time_state.current_time
+        apply_time = time_state.current_time
         
         # --- Action Log: Query events for Purple agent tracking ---
         # This is for scoring and audit purposes
         events = await self.ues_client.events.get_events(
             since=turn_start_time,
-            until=current_time,
+            until=apply_time,
         )
         
         # Build action log from events (filters by Purple agent_id)
@@ -1904,27 +1910,36 @@ class GreenAgent:
         
         # --- Response Generation: Collect new messages from modalities ---
         # This gives us full message objects with thread_id, message_id, etc.
-        new_messages = await message_collector.collect(current_time)
+        new_messages = await message_collector.collect(apply_time)
         
         # Generate character responses to new messages
         responses = await response_generator.process_new_messages(new_messages)
         
-        # Schedule responses in UES (will fire on future time advances)
+        # Schedule responses in UES (will fire during remainder advance)
         for scheduled in responses:
             await self._schedule_response(scheduled)
+        
+        # == Step 3b: Remainder advance — advance by (time_step - 1s) ==
+        # This fires the character responses scheduled above, so Purple
+        # sees them when it queries UES state on its next turn.
+        remainder_events = await self._advance_remainder(
+            time_step=turn_complete.time_step, apply_seconds=1
+        )
+        
+        total_events = apply_events + remainder_events
         
         return TurnResult(
             turn_number=turn,
             actions_taken=len(purple_entries),
             notes=turn_complete.notes,
             time_step=turn_complete.time_step,
-            events_processed=events_processed,
+            events_processed=total_events,
             early_completion=False,
         )
     
     # ... additional helper methods (_start_ues_server, _wait_for_ues_ready,
     #     _build_initial_state_summary, _send_assessment_start, _capture_state_snapshot,
-    #     _emit_action_update, _schedule_response, _advance_time,
+    #     _emit_action_update, _schedule_response, _advance_time, _advance_remainder,
     #     _send_assessment_complete, _build_results)
 ```
 
@@ -1939,7 +1954,8 @@ class GreenAgent:
 | `_capture_state_snapshot()` | Get current UES state for evaluation |
 | `_emit_action_update()` | Emit `ActionObservedUpdate` for each action |
 | `_schedule_response()` | Schedule a character response in UES |
-| `_advance_time()` | Advance UES simulation time, return events processed |
+| `_advance_time()` | Advance UES simulation time by a given duration |
+| `_advance_remainder()` | Advance by time_step minus apply seconds (two-phase) |
 | `_send_assessment_complete()` | Send `AssessmentCompleteMessage` to Purple |
 | `_build_results()` | Construct `AssessmentResults` from evaluation data |
 
@@ -1967,6 +1983,8 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks import TaskUpdater
 from a2a.types import Task, TaskState
 from a2a.utils import new_task, new_agent_text_message
+
+from src.common.agentbeats.updates import TaskUpdateEmitter
 
 class EvalRequest(BaseModel):
     """Assessment request format from AgentBeats platform.
@@ -2075,10 +2093,13 @@ class GreenAgentExecutor(AgentExecutor):
             purple_url = str(eval_request.participants["assistant"])
             purple_client = await self._create_purple_client(purple_url)
             
+            # Create TaskUpdateEmitter for structured updates
+            emitter = TaskUpdateEmitter(updater)
+            
             # Run the assessment
             results = await agent.run(
                 task_id=task_id,
-                updater=updater,
+                emitter=emitter,
                 scenario=scenario,
                 evaluators=evaluators,
                 purple_client=purple_client,
@@ -2234,10 +2255,11 @@ src/green/
 │  │  3. Turn Loop:                                                            │
 │  │     a. Send TurnStartMessage to Purple                                   │
 │  │     b. Receive TurnCompleteMessage                                       │
-│  │     c. Log actions (ActionLogBuilder)                                    │
-│  │     d. Generate responses (ResponseGenerator)                            │
-│  │     e. Schedule responses in UES                                         │
-│  │     f. Advance UES time                                                  │
+│  │     c. Advance UES time by 1s (apply Purple's events)                    │
+│  │     d. Log actions (ActionLogBuilder)                                    │
+│  │     e. Generate responses (ResponseGenerator)                            │
+│  │     f. Schedule responses in UES                                         │
+│  │     g. Advance UES time by remainder (time_step - 1s)                    │
 │  │  4. Evaluate (CriteriaJudge)                                             │
 │  │  5. Send AssessmentCompleteMessage to Purple                             │
 │  │  6. Return AssessmentResults                                             │
@@ -2252,7 +2274,6 @@ src/green/
 │  └─────────────────┘                                                        │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
-```
 ```
 
 ---

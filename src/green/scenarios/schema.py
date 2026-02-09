@@ -484,7 +484,7 @@ class ScenarioConfig(BaseModel):
         user_prompt: The task description given to the Purple agent via chat.
         user_character: Key of the character in `characters` that represents the user.
         characters: Mapping of character ID to CharacterProfile.
-        initial_state: UES scenario export (imported at assessment start).
+        initial_state: Full UES scenario export (metadata, environment, events).
         criteria: List of evaluation criteria.
         early_completion_conditions: Optional conditions that end assessment early.
 
@@ -553,7 +553,9 @@ class ScenarioConfig(BaseModel):
     )
     initial_state: dict[str, Any] = Field(
         ...,
-        description="UES scenario export (imported at assessment start)",
+        description="Full UES scenario export for /scenario/import/full endpoint. "
+        "Must include 'metadata', 'environment' (with 'time_state' and 'modality_states'), "
+        "and 'events' sections.",
     )
     criteria: list[EvaluationCriterion] = Field(
         ...,

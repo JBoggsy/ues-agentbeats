@@ -175,25 +175,30 @@ This document details the A2A protocol interaction flow for the UES Green Agent 
 │  2. Purple → Green (A2A): turn_complete                                      │
 │     { notes: "...", time_step: "PT1H" }                                      │
 │                                                                              │
-│  3. Green: Advances simulation time by time_step, processes events           │
+│  3. Green: Two-phase time advancement:                                       │
+│     a) Advance simulation time by 1 second — this applies all events         │
+│        that Purple scheduled during its turn (e.g., send email, create       │
+│        calendar event) so they become visible in modality state.             │
+│     b) Green queries UES for action log AND new messages:                    │
+│        - Events: Query event log for Purple agent actions (for scoring)      │
+│        - Messages: Query modality states for new emails/SMS/calendar events  │
+│          (for response generation with full message objects)                 │
+│     c) Green runs response generator for new messages                        │
+│        (replies to Purple emails/SMS, but also responds to character-        │
+│         initiated messages that appeared during the 1s advance)             │
+│     d) Green schedules character responses in UES (with future timestamps)  │
+│     e) Advance simulation time by remainder (time_step - 1s) — this         │
+│        fires the scheduled character responses so they appear in state      │
+│        before Purple's next turn.                                           │
 │                                                                              │
-│  4. Green: Queries UES for action log AND new messages:                      │
-│     - Events: Query event log for Purple agent actions (for scoring)         │
-│     - Messages: Query modality states for new emails/SMS/calendar events     │
-│       (for response generation with full message objects)                    │
-│                                                                              │
-│  5. Green: Runs response generator for new messages                          │
-│     (replies to Purple emails/SMS, but also responds to character-initiated  │
-│      messages that appeared during time advancement)                         │
-│                                                                              │
-│  6. Green → Purple (A2A): turn_start                                         │
+│  4. Green → Purple (A2A): turn_start                                         │
 │     {                                                                        │
 │       turn_number: 2,                                                        │
 │       current_time: "2026-01-22T10:00:00Z",                                  │
 │       events_processed: 3                                                    │
 │     }                                                                        │
 │                                                                              │
-│  7. Repeat until termination condition                                       │
+│  5. Repeat until termination condition                                       │
 └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
                                     │
                                     ▼
@@ -295,10 +300,14 @@ Note: Chat has no "unread" concept (it models user-assistant conversations). The
 - `notes`: Optional free-form text for agent reasoning/transparency. Logged in action history and may factor into evaluation scoring.
 - `time_step`: ISO 8601 duration format (e.g., "PT1H" = 1 hour, "PT30M" = 30 minutes) indicating how much time should advance. If omitted, Green uses scenario default.
 
-**Note on Action Tracking**: The Green agent builds the action log by querying the UES event log after time advances, filtering for events attributed to the Purple agent. This approach:
+**Note on Action Tracking**: The Green agent builds the action log by querying the UES event log after the initial 1-second time advance (which applies Purple's events), filtering for events attributed to the Purple agent. This approach:
 - Ensures accurate, tamper-proof action recording
 - Captures all actions regardless of Purple agent's reporting
 - Uses UES event attribution (via agent_id) to distinguish Purple vs Green actions
+
+**Note on Two-Phase Time Advancement**: Time is advanced in two phases to ensure proper ordering of operations:
+1. **Apply advance (1s)**: Ensures Purple's scheduled events are applied and visible in UES state before Green processes them for action logging and response generation.
+2. **Remainder advance (time_step - 1s)**: Fires the character responses scheduled by Green, so Purple sees them on its next turn. This separation prevents a race condition where Green would try to read Purple's actions before they've been applied to UES state.
 
 **TurnStartMessage**
 ```json
@@ -349,7 +358,10 @@ With response generation, scenarios can test:
 │                                                                              │
 │  1. Purple completes turn → Green receives turn_complete                     │
 │                                                                              │
-│  2. Green advances simulation time by time_step                              │
+│  2. Green advances simulation time by 1 second ("apply advance")             │
+│     - This causes all events Purple scheduled during its turn to be          │
+│       applied immediately (emails sent, calendar events created, etc.)       │
+│     - After this 1s advance, Purple's actions are visible in UES state       │
 │                                                                              │
 │  3. Green queries UES for new data:                                          │
 │     a) Event log: Get Purple agent actions (for action log / scoring)        │
@@ -364,8 +376,14 @@ With response generation, scenarios can test:
 │        - Check if response is warranted (via LLM)                            │
 │        - If yes: generate in-character response, schedule with delay         │
 │                                                                              │
-│  5. Green sends turn_start to Purple → Scheduled responses fire when         │
-│     Purple's next turn completes and time advances                           │
+│  5. Green schedules character responses in UES (as future events)            │
+│                                                                              │
+│  6. Green advances simulation time by remainder (time_step - 1s)             │
+│     - This fires the scheduled character responses, making them visible      │
+│       in UES modality state before Purple's next turn                        │
+│     - Purple will see character replies when it queries state on next turn   │
+│                                                                              │
+│  7. Green sends turn_start to Purple for the next turn                       │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
