@@ -9,6 +9,7 @@ This module tests:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from a2a.types import TaskState
@@ -46,9 +47,17 @@ def sample_datetime() -> datetime:
 
 
 @pytest.fixture
-def emitter() -> TaskUpdateEmitter:
+def mock_updater() -> MagicMock:
+    """Return a mock TaskUpdater for tests."""
+    updater = MagicMock()
+    updater.update_status = AsyncMock()
+    return updater
+
+
+@pytest.fixture
+def emitter(mock_updater: MagicMock) -> TaskUpdateEmitter:
     """Return a TaskUpdateEmitter for tests."""
-    return TaskUpdateEmitter(task_id="task-123", context_id="ctx-456")
+    return TaskUpdateEmitter(mock_updater)
 
 
 # =============================================================================
@@ -673,137 +682,172 @@ class TestParseUpdate:
 class TestTaskUpdateEmitter:
     """Tests for TaskUpdateEmitter class."""
 
-    def test_init(self, emitter: TaskUpdateEmitter) -> None:
-        """Emitter initializes with task_id and context_id."""
-        assert emitter.task_id == "task-123"
-        assert emitter.context_id == "ctx-456"
-
-    def test_assessment_started(
-        self, emitter: TaskUpdateEmitter, sample_datetime: datetime
+    def test_init(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
     ) -> None:
-        """assessment_started creates correct event."""
-        event = emitter.assessment_started(
+        """Emitter initializes with TaskUpdater."""
+        assert emitter._updater is mock_updater
+
+    @pytest.mark.asyncio
+    async def test_assessment_started(
+        self,
+        emitter: TaskUpdateEmitter,
+        mock_updater: MagicMock,
+        sample_datetime: datetime,
+    ) -> None:
+        """assessment_started sends correct update."""
+        await emitter.assessment_started(
             assessment_id="assess-001",
             scenario_id="email_triage_basic",
             participant_url="http://purple:8001",
             start_time=sample_datetime,
         )
 
-        assert event.task_id == "task-123"
-        assert event.context_id == "ctx-456"
-        assert event.status.state == TaskState.working
-        assert event.final is False
+        # Verify update_status was called
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        assert call_kwargs["state"] == TaskState.working
 
-        # Verify embedded update data
-        assert event.status.message is not None
-        parts = event.status.message.parts
+        # Verify the message contains correct data
+        message = call_kwargs["message"]
+        parts = message.parts
         assert len(parts) == 1
         data_part = parts[0].root
         assert data_part.data["message_type"] == "update_assessment_started"
         assert data_part.data["assessment_id"] == "assess-001"
 
-    def test_scenario_loaded(self, emitter: TaskUpdateEmitter) -> None:
-        """scenario_loaded creates correct event."""
-        event = emitter.scenario_loaded(
+    @pytest.mark.asyncio
+    async def test_scenario_loaded(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """scenario_loaded sends correct update."""
+        await emitter.scenario_loaded(
             scenario_id="email_triage_basic",
             scenario_name="Basic Email Triage",
             criteria_count=5,
             character_count=3,
         )
 
-        assert event.status.state == TaskState.working
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        assert call_kwargs["state"] == TaskState.working
+        message = call_kwargs["message"]
+        data_part = message.parts[0].root
         assert data_part.data["message_type"] == "update_scenario_loaded"
         assert data_part.data["criteria_count"] == 5
 
-    def test_turn_started(
-        self, emitter: TaskUpdateEmitter, sample_datetime: datetime
+    @pytest.mark.asyncio
+    async def test_turn_started(
+        self,
+        emitter: TaskUpdateEmitter,
+        mock_updater: MagicMock,
+        sample_datetime: datetime,
     ) -> None:
-        """turn_started creates correct event."""
-        event = emitter.turn_started(
+        """turn_started sends correct update."""
+        await emitter.turn_started(
             turn_number=3,
             current_time=sample_datetime,
             events_pending=5,
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_turn_started"
         assert data_part.data["turn_number"] == 3
 
-    def test_turn_completed(self, emitter: TaskUpdateEmitter) -> None:
-        """turn_completed creates correct event."""
-        event = emitter.turn_completed(
+    @pytest.mark.asyncio
+    async def test_turn_completed(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """turn_completed sends correct update."""
+        await emitter.turn_completed(
             turn_number=3,
             actions_taken=4,
             time_advanced="PT1H",
             early_completion_requested=True,
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_turn_completed"
         assert data_part.data["early_completion_requested"] is True
 
-    def test_responses_generated(self, emitter: TaskUpdateEmitter) -> None:
-        """responses_generated creates correct event."""
-        event = emitter.responses_generated(
+    @pytest.mark.asyncio
+    async def test_responses_generated(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """responses_generated sends correct update."""
+        await emitter.responses_generated(
             turn_number=2,
             responses_count=3,
             characters_involved=["Alice", "Bob"],
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_responses_generated"
         assert data_part.data["characters_involved"] == ["Alice", "Bob"]
 
-    def test_responses_generated_default_characters(
-        self, emitter: TaskUpdateEmitter
+    @pytest.mark.asyncio
+    async def test_responses_generated_default_characters(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
     ) -> None:
         """responses_generated defaults characters to empty list."""
-        event = emitter.responses_generated(
+        await emitter.responses_generated(
             turn_number=1,
             responses_count=0,
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["characters_involved"] == []
 
-    def test_simulation_advanced(self, emitter: TaskUpdateEmitter) -> None:
-        """simulation_advanced creates correct event."""
+    @pytest.mark.asyncio
+    async def test_simulation_advanced(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """simulation_advanced sends correct update."""
         t1 = datetime(2026, 1, 28, 9, 0, tzinfo=timezone.utc)
         t2 = datetime(2026, 1, 28, 10, 0, tzinfo=timezone.utc)
 
-        event = emitter.simulation_advanced(
+        await emitter.simulation_advanced(
             previous_time=t1,
             new_time=t2,
             duration="PT1H",
             events_processed=2,
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_simulation_advanced"
         assert data_part.data["events_processed"] == 2
 
-    def test_evaluation_started(self, emitter: TaskUpdateEmitter) -> None:
-        """evaluation_started creates correct event."""
-        event = emitter.evaluation_started(
+    @pytest.mark.asyncio
+    async def test_evaluation_started(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """evaluation_started sends correct update."""
+        await emitter.evaluation_started(
             criteria_count=5,
             dimensions=["accuracy", "efficiency"],
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_evaluation_started"
         assert data_part.data["dimensions"] == ["accuracy", "efficiency"]
 
-    def test_criterion_evaluated(self, emitter: TaskUpdateEmitter) -> None:
-        """criterion_evaluated creates correct event."""
-        event = emitter.criterion_evaluated(
+    @pytest.mark.asyncio
+    async def test_criterion_evaluated(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """criterion_evaluated sends correct update."""
+        await emitter.criterion_evaluated(
             criterion_id="email_politeness",
             criterion_name="Email Politeness",
             dimension="politeness",
@@ -812,15 +856,19 @@ class TestTaskUpdateEmitter:
             evaluation_method="llm",
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_criterion_evaluated"
         assert data_part.data["score"] == 8
         assert data_part.data["evaluation_method"] == "llm"
 
-    def test_assessment_completed(self, emitter: TaskUpdateEmitter) -> None:
-        """assessment_completed creates terminal event."""
-        event = emitter.assessment_completed(
+    @pytest.mark.asyncio
+    async def test_assessment_completed(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """assessment_completed sends terminal update."""
+        await emitter.assessment_completed(
             reason="scenario_complete",
             total_turns=10,
             total_actions=25,
@@ -829,47 +877,58 @@ class TestTaskUpdateEmitter:
             max_score=100,
         )
 
-        # Should be final and completed state
-        assert event.status.state == TaskState.completed
-        assert event.final is True
+        # Should use completed state
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        assert call_kwargs["state"] == TaskState.completed
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_assessment_completed"
         assert data_part.data["overall_score"] == 85
 
-    def test_error_occurred_recoverable(self, emitter: TaskUpdateEmitter) -> None:
-        """error_occurred with recoverable=True is not final."""
-        event = emitter.error_occurred(
+    @pytest.mark.asyncio
+    async def test_error_occurred_recoverable(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """error_occurred with recoverable=True uses working state."""
+        await emitter.error_occurred(
             error_type="communication_error",
             error_message="Connection refused",
             recoverable=True,
             context={"retry_count": 1},
         )
 
-        assert event.status.state == TaskState.working
-        assert event.final is False
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        assert call_kwargs["state"] == TaskState.working
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["context"] == {"retry_count": 1}
 
-    def test_error_occurred_not_recoverable(self, emitter: TaskUpdateEmitter) -> None:
-        """error_occurred with recoverable=False is final."""
-        event = emitter.error_occurred(
+    @pytest.mark.asyncio
+    async def test_error_occurred_not_recoverable(
+        self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
+    ) -> None:
+        """error_occurred with recoverable=False uses failed state."""
+        await emitter.error_occurred(
             error_type="timeout",
             error_message="Purple agent timed out",
             recoverable=False,
         )
 
-        assert event.status.state == TaskState.failed
-        assert event.final is True
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        assert call_kwargs["state"] == TaskState.failed
 
-    def test_action_observed(
-        self, emitter: TaskUpdateEmitter, sample_datetime: datetime
+    @pytest.mark.asyncio
+    async def test_action_observed(
+        self,
+        emitter: TaskUpdateEmitter,
+        mock_updater: MagicMock,
+        sample_datetime: datetime,
     ) -> None:
-        """action_observed creates correct event with all fields."""
-        event = emitter.action_observed(
+        """action_observed sends correct update with all fields."""
+        await emitter.action_observed(
             turn_number=2,
             timestamp=sample_datetime,
             action="email.send",
@@ -878,11 +937,11 @@ class TestTaskUpdateEmitter:
             notes="Responding to Alice",
         )
 
-        assert event.status.state == TaskState.working
-        assert event.final is False
+        mock_updater.update_status.assert_called_once()
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        assert call_kwargs["state"] == TaskState.working
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_action_observed"
         assert data_part.data["turn_number"] == 2
         assert data_part.data["action"] == "email.send"
@@ -893,11 +952,15 @@ class TestTaskUpdateEmitter:
         assert data_part.data["success"] is True
         assert data_part.data["notes"] == "Responding to Alice"
 
-    def test_action_observed_with_error(
-        self, emitter: TaskUpdateEmitter, sample_datetime: datetime
+    @pytest.mark.asyncio
+    async def test_action_observed_with_error(
+        self,
+        emitter: TaskUpdateEmitter,
+        mock_updater: MagicMock,
+        sample_datetime: datetime,
     ) -> None:
         """action_observed captures error_message for failed actions."""
-        event = emitter.action_observed(
+        await emitter.action_observed(
             turn_number=3,
             timestamp=sample_datetime,
             action="calendar.create",
@@ -906,21 +969,7 @@ class TestTaskUpdateEmitter:
             error_message="Calendar not found",
         )
 
-        parts = event.status.message.parts
-        data_part = parts[0].root
+        call_kwargs = mock_updater.update_status.call_args.kwargs
+        data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["success"] is False
         assert data_part.data["error_message"] == "Calendar not found"
-
-    def test_events_have_timestamps(
-        self, emitter: TaskUpdateEmitter, sample_datetime: datetime
-    ) -> None:
-        """All emitted events should have timestamps."""
-        event = emitter.turn_started(
-            turn_number=1,
-            current_time=sample_datetime,
-            events_pending=0,
-        )
-
-        assert event.status.timestamp is not None
-        # Verify it's a valid ISO timestamp
-        datetime.fromisoformat(event.status.timestamp.replace("Z", "+00:00"))

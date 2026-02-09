@@ -31,9 +31,13 @@ Design Note:
     be embedded in A2A TaskStatusUpdateEvent messages.
 
 Example:
-    >>> from src.common.agentbeats.updates import TaskUpdateEmitter, ActionObservedUpdate
-    >>> emitter = TaskUpdateEmitter(task_id="task-123", context_id="ctx-456")
-    >>> update = emitter.action_observed(
+    >>> from a2a.server.tasks import TaskUpdater
+    >>> from src.common.agentbeats.updates import TaskUpdateEmitter
+    >>> # Create emitter with TaskUpdater from A2A SDK
+    >>> updater = TaskUpdater(event_queue, task_id, context_id)
+    >>> emitter = TaskUpdateEmitter(updater)
+    >>> await emitter.action_observed(
+    ...     turn_number=1,
     ...     action="email.send",
     ...     parameters={"to": ["alice@example.com"]},
     ...     success=True,
@@ -45,18 +49,20 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
 
 from a2a.types import Message, TaskState, TaskStatusUpdateEvent, TaskStatus
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.common.a2a.messages import create_data_message
 
+if TYPE_CHECKING:
+    from a2a.server.tasks import TaskUpdater
+
 
 # =============================================================================
 # Update Type Enum
 # =============================================================================
-
 
 class TaskUpdateType(str, Enum):
     """Types of task updates for logging.
@@ -521,81 +527,63 @@ class TaskUpdateEmitter:
     """Helper for emitting structured task updates as A2A events.
 
     This class simplifies the process of creating and emitting AgentBeats-style
-    task updates. It holds the task_id and context_id, and provides typed
-    convenience methods for each update type.
+    task updates. It wraps a TaskUpdater and provides typed convenience methods
+    for each update type.
 
-    The emitter creates TaskStatusUpdateEvent objects that can be yielded
-    from an A2A executor or enqueued to an event queue.
+    The emitter creates structured update models, converts them to A2A messages,
+    and sends them via the TaskUpdater.
 
     Attributes:
-        task_id: The A2A task ID for all emitted updates.
-        context_id: The A2A context ID for all emitted updates.
+        updater: The A2A TaskUpdater for sending events.
 
     Example:
-        >>> emitter = TaskUpdateEmitter(task_id="task-123", context_id="ctx-456")
-        >>> event = emitter.assessment_started(
+        >>> from a2a.server.tasks import TaskUpdater
+        >>> updater = TaskUpdater(event_queue, task_id, context_id)
+        >>> emitter = TaskUpdateEmitter(updater)
+        >>> await emitter.assessment_started(
         ...     assessment_id="assess-001",
         ...     scenario_id="email_triage_basic",
         ...     participant_url="http://purple:8001",
         ...     start_time=datetime.now(tz=timezone.utc)
         ... )
-        >>> # event is a TaskStatusUpdateEvent ready to be yielded/enqueued
     """
 
-    def __init__(self, task_id: str, context_id: str) -> None:
+    def __init__(self, updater: TaskUpdater) -> None:
         """Initialize the emitter.
 
         Args:
-            task_id: The A2A task ID for updates.
-            context_id: The A2A context ID for updates.
+            updater: The A2A TaskUpdater for sending events.
         """
-        self.task_id = task_id
-        self.context_id = context_id
+        self._updater = updater
 
-    def _create_event(
+    async def _emit(
         self,
         update: AgentBeatsUpdate,
         state: TaskState = TaskState.working,
-        final: bool = False,
-    ) -> TaskStatusUpdateEvent:
-        """Create a TaskStatusUpdateEvent from an update model.
+    ) -> None:
+        """Emit a task update via the TaskUpdater.
 
         Args:
-            update: The update model to embed in the event.
-            state: The task state for the event.
-            final: Whether this is a final update.
-
-        Returns:
-            A TaskStatusUpdateEvent with the update as a data message.
+            update: The update model to emit.
+            state: The task state for the update.
         """
         # Serialize update to dict and wrap in A2A message
         update_data = update.model_dump(mode="json")
         message = create_data_message(data=update_data)
 
-        timestamp = datetime.now(timezone.utc).isoformat()
-
-        return TaskStatusUpdateEvent(
-            task_id=self.task_id,
-            context_id=self.context_id,
-            status=TaskStatus(
-                state=state,
-                message=message,
-                timestamp=timestamp,
-            ),
-            final=final,
-        )
+        await self._updater.update_status(state=state, message=message)
 
     # =========================================================================
     # Green Agent Update Methods
     # =========================================================================
 
-    def assessment_started(
+    async def assessment_started(
         self,
         assessment_id: str,
         scenario_id: str,
         participant_url: str,
         start_time: datetime,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit an assessment started update.
 
         Args:
@@ -603,9 +591,6 @@ class TaskUpdateEmitter:
             scenario_id: ID of the scenario being used.
             participant_url: A2A endpoint URL of the Purple agent.
             start_time: When the assessment started.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = AssessmentStartedUpdate(
             assessment_id=assessment_id,
@@ -613,15 +598,15 @@ class TaskUpdateEmitter:
             participant_url=participant_url,
             start_time=start_time,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def scenario_loaded(
+    async def scenario_loaded(
         self,
         scenario_id: str,
         scenario_name: str,
         criteria_count: int,
         character_count: int,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit a scenario loaded update.
 
         Args:
@@ -629,9 +614,6 @@ class TaskUpdateEmitter:
             scenario_name: Human-readable scenario name.
             criteria_count: Number of evaluation criteria.
             character_count: Number of simulated characters.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = ScenarioLoadedUpdate(
             scenario_id=scenario_id,
@@ -639,38 +621,35 @@ class TaskUpdateEmitter:
             criteria_count=criteria_count,
             character_count=character_count,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def turn_started(
+    async def turn_started(
         self,
         turn_number: int,
         current_time: datetime,
         events_pending: int,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit a turn started update.
 
         Args:
             turn_number: The turn number (1-indexed).
             current_time: Current simulation time.
             events_pending: Number of pending events in UES.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = TurnStartedUpdate(
             turn_number=turn_number,
             current_time=current_time,
             events_pending=events_pending,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def turn_completed(
+    async def turn_completed(
         self,
         turn_number: int,
         actions_taken: int,
         time_advanced: str,
         early_completion_requested: bool = False,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit a turn completed update.
 
         Args:
@@ -678,9 +657,6 @@ class TaskUpdateEmitter:
             actions_taken: Number of actions the Purple agent took.
             time_advanced: ISO 8601 duration of time advanced.
             early_completion_requested: Whether Purple requested early completion.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = TurnCompletedUpdate(
             turn_number=turn_number,
@@ -688,38 +664,35 @@ class TaskUpdateEmitter:
             time_advanced=time_advanced,
             early_completion_requested=early_completion_requested,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def responses_generated(
+    async def responses_generated(
         self,
         turn_number: int,
         responses_count: int,
         characters_involved: list[str] | None = None,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit a responses generated update.
 
         Args:
             turn_number: The turn for which responses were generated.
             responses_count: Number of responses generated.
             characters_involved: List of character names that responded.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = ResponsesGeneratedUpdate(
             turn_number=turn_number,
             responses_count=responses_count,
             characters_involved=characters_involved or [],
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def simulation_advanced(
+    async def simulation_advanced(
         self,
         previous_time: datetime,
         new_time: datetime,
         duration: str,
         events_processed: int,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit a simulation advanced update.
 
         Args:
@@ -727,9 +700,6 @@ class TaskUpdateEmitter:
             new_time: Time after advancement.
             duration: ISO 8601 duration of advancement.
             events_processed: Number of events processed.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = SimulationAdvancedUpdate(
             previous_time=previous_time,
@@ -737,9 +707,9 @@ class TaskUpdateEmitter:
             duration=duration,
             events_processed=events_processed,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def evaluation_started(
+    async def evaluation_started(
         self,
         criteria_count: int,
         dimensions: list[str],
@@ -749,17 +719,14 @@ class TaskUpdateEmitter:
         Args:
             criteria_count: Total number of criteria to evaluate.
             dimensions: List of scoring dimensions being evaluated.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = EvaluationStartedUpdate(
             criteria_count=criteria_count,
             dimensions=dimensions,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def criterion_evaluated(
+    async def criterion_evaluated(
         self,
         criterion_id: str,
         criterion_name: str,
@@ -767,7 +734,7 @@ class TaskUpdateEmitter:
         score: float,
         max_score: float,
         evaluation_method: Literal["programmatic", "llm"],
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit a criterion evaluated update.
 
         Args:
@@ -777,9 +744,6 @@ class TaskUpdateEmitter:
             score: Achieved score.
             max_score: Maximum possible score.
             evaluation_method: How the criterion was evaluated.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = CriterionEvaluatedUpdate(
             criterion_id=criterion_id,
@@ -789,9 +753,9 @@ class TaskUpdateEmitter:
             max_score=max_score,
             evaluation_method=evaluation_method,
         )
-        return self._create_event(update)
+        await self._emit(update)
 
-    def assessment_completed(
+    async def assessment_completed(
         self,
         reason: Literal["scenario_complete", "early_completion", "timeout", "error"],
         total_turns: int,
@@ -799,7 +763,7 @@ class TaskUpdateEmitter:
         duration_seconds: float,
         overall_score: float,
         max_score: float,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit an assessment completed update.
 
         Args:
@@ -809,9 +773,6 @@ class TaskUpdateEmitter:
             duration_seconds: Assessment duration in seconds.
             overall_score: Final overall score.
             max_score: Maximum possible score.
-
-        Returns:
-            A TaskStatusUpdateEvent with final=True.
         """
         update = AssessmentCompletedUpdate(
             reason=reason,
@@ -822,9 +783,9 @@ class TaskUpdateEmitter:
             max_score=max_score,
         )
         # Assessment completed is a terminal state
-        return self._create_event(update, state=TaskState.completed, final=True)
+        await self._emit(update, state=TaskState.completed)
 
-    def error_occurred(
+    async def error_occurred(
         self,
         error_type: Literal[
             "timeout",
@@ -837,7 +798,7 @@ class TaskUpdateEmitter:
         error_message: str,
         recoverable: bool,
         context: dict[str, Any] | None = None,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit an error occurred update.
 
         Args:
@@ -845,9 +806,6 @@ class TaskUpdateEmitter:
             error_message: Human-readable error description.
             recoverable: Whether the assessment can continue.
             context: Optional additional context about the error.
-
-        Returns:
-            A TaskStatusUpdateEvent (final if not recoverable).
         """
         update = ErrorOccurredUpdate(
             error_type=error_type,
@@ -857,14 +815,13 @@ class TaskUpdateEmitter:
         )
         # If not recoverable, this is a terminal error
         state = TaskState.working if recoverable else TaskState.failed
-        final = not recoverable
-        return self._create_event(update, state=state, final=final)
+        await self._emit(update, state=state)
 
     # =========================================================================
     # Action Logging (called when processing TurnCompleteMessage)
     # =========================================================================
 
-    def action_observed(
+    async def action_observed(
         self,
         turn_number: int,
         timestamp: datetime,
@@ -873,7 +830,7 @@ class TaskUpdateEmitter:
         success: bool,
         error_message: str | None = None,
         notes: str | None = None,
-    ) -> TaskStatusUpdateEvent:
+    ) -> None:
         """Emit an action observed update.
 
         The Green agent calls this method for each ActionLogEntry created
@@ -888,9 +845,6 @@ class TaskUpdateEmitter:
             success: Whether the action succeeded.
             error_message: Error message if success=False.
             notes: Optional reasoning or explanation for the action.
-
-        Returns:
-            A TaskStatusUpdateEvent to be yielded/enqueued.
         """
         update = ActionObservedUpdate(
             turn_number=turn_number,
@@ -901,4 +855,4 @@ class TaskUpdateEmitter:
             error_message=error_message,
             notes=notes,
         )
-        return self._create_event(update)
+        await self._emit(update)
