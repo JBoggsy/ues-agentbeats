@@ -565,7 +565,21 @@ class GreenAgent:
             to Purple for authentication; the ``key_id`` is used as
             Purple's ``agent_id`` for event attribution.
         """
-        raise NotImplementedError
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self._ues_server.base_url}/keys",
+                headers={"X-API-Key": self._ues_server.admin_api_key},
+                json={
+                    "name": f"Purple Agent ({assessment_id})",
+                    "permissions": USER_PERMISSIONS,
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["secret"], data["key_id"]
 
     async def _revoke_user_api_key(self, key_id: str) -> None:
         """Revoke a user API key after an assessment ends.
@@ -578,7 +592,17 @@ class GreenAgent:
             key_id: The key ID to revoke (returned by
                 ``_create_user_api_key``).
         """
-        raise NotImplementedError
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            response = await client.delete(
+                f"{self._ues_server.base_url}/keys/{key_id}",
+                headers={"X-API-Key": self._ues_server.admin_api_key},
+                timeout=10.0,
+            )
+            # Ignore 404 (key already revoked or doesn't exist)
+            if response.status_code not in (200, 204, 404):
+                response.raise_for_status()
 
     # ------------------------------------------------------------------
     # UES setup (private)
