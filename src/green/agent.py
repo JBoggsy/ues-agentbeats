@@ -896,7 +896,14 @@ class GreenAgent:
             ValueError: If ``scheduled.modality`` is not a recognized
                 modality (``"email"``, ``"sms"``, or ``"calendar"``).
         """
-        raise NotImplementedError
+        if scheduled.modality == "email":
+            await self._schedule_email_response(scheduled)
+        elif scheduled.modality == "sms":
+            await self._schedule_sms_response(scheduled)
+        elif scheduled.modality == "calendar":
+            await self._schedule_calendar_response(scheduled)
+        else:
+            raise ValueError(f"Unknown modality: {scheduled.modality}")
 
     async def _schedule_email_response(
         self,
@@ -912,7 +919,23 @@ class GreenAgent:
                 ``character_email``, ``recipients``, ``subject``,
                 ``content``, and threading fields populated.
         """
-        raise NotImplementedError
+        logger.debug(
+            "Scheduling email response from %s to %s: %s",
+            scheduled.character_email,
+            scheduled.recipients,
+            scheduled.subject,
+        )
+        await self.ues_client.email.receive(
+            from_address=scheduled.character_email,
+            to_addresses=scheduled.recipients,
+            subject=scheduled.subject or "",
+            body_text=scheduled.content or "",
+            cc_addresses=scheduled.cc_recipients or None,
+            thread_id=scheduled.thread_id,
+            in_reply_to=scheduled.in_reply_to,
+            references=scheduled.references or None,
+            sent_at=scheduled.scheduled_time,
+        )
 
     async def _schedule_sms_response(
         self,
@@ -928,7 +951,18 @@ class GreenAgent:
                 ``character_phone``, ``recipients``, and ``content``
                 populated.
         """
-        raise NotImplementedError
+        logger.debug(
+            "Scheduling SMS response from %s to %s",
+            scheduled.character_phone,
+            scheduled.recipients,
+        )
+        await self.ues_client.sms.receive(
+            from_number=scheduled.character_phone,
+            to_numbers=scheduled.recipients,
+            body=scheduled.content or "",
+            replied_to_message_id=scheduled.original_message_id,
+            sent_at=scheduled.scheduled_time,
+        )
 
     async def _schedule_calendar_response(
         self,
@@ -944,7 +978,18 @@ class GreenAgent:
                 ``character_email``, ``event_id``, ``rsvp_status``,
                 and optionally ``rsvp_comment`` populated.
         """
-        raise NotImplementedError
+        logger.debug(
+            "Scheduling calendar RSVP from %s for event %s: %s",
+            scheduled.character_email,
+            scheduled.event_id,
+            scheduled.rsvp_status,
+        )
+        await self.ues_client.calendar.respond_to_event(
+            event_id=scheduled.event_id,
+            attendee_email=scheduled.character_email,
+            response=scheduled.rsvp_status,
+            comment=scheduled.rsvp_comment,
+        )
 
     # ------------------------------------------------------------------
     # Result building (private)

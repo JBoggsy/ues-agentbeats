@@ -38,3 +38,9 @@ markers = [
     "ollama: marks tests that require local Ollama server",
     "openai: marks tests that require OpenAI API key",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
