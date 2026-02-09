@@ -237,10 +237,50 @@ class TestUserPermissions:
 class TestGreenAgentInit:
     """Tests for GreenAgent.__init__."""
 
-    def test_raises_not_implemented(self, config: GreenAgentConfig) -> None:
-        """__init__ should raise NotImplementedError (stubbed)."""
-        with pytest.raises(NotImplementedError):
+    def test_initializes_agent_with_config(self, config: GreenAgentConfig) -> None:
+        """__init__ should initialize agent with config and LLMs."""
+        with patch("src.green.agent.LLMFactory") as mock_factory:
+            mock_llm = MagicMock()
+            mock_factory.create.return_value = mock_llm
+
+            agent = GreenAgent(ues_port=8100, config=config)
+
+            assert agent.config == config
+            assert agent.ues_port == 8100
+            assert agent.response_llm == mock_llm
+            assert agent.evaluation_llm == mock_llm
+            assert agent.ues_client is None
+            assert agent._current_task_id is None
+            assert agent._cancelled is False
+
+    def test_creates_ues_server_manager(self, config: GreenAgentConfig) -> None:
+        """__init__ should create UESServerManager with correct port."""
+        with patch("src.green.agent.LLMFactory") as mock_factory:
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8200, config=config)
+
+            assert agent._ues_server.port == 8200
+            assert agent._ues_port == 8200
+            assert agent._proctor_api_key == agent._ues_server.admin_api_key
+
+    def test_creates_llms_with_correct_params(self, config: GreenAgentConfig) -> None:
+        """__init__ should create LLMs with correct model names and temperatures."""
+        with patch("src.green.agent.LLMFactory") as mock_factory:
+            mock_factory.create.return_value = MagicMock()
+
             GreenAgent(ues_port=8100, config=config)
+
+            # Check response LLM creation
+            mock_factory.create.assert_any_call(
+                config.response_generator_model,
+                temperature=0.7,
+            )
+            # Check evaluation LLM creation
+            mock_factory.create.assert_any_call(
+                config.evaluation_model,
+                temperature=0.0,
+            )
 
 
 # =============================================================================
@@ -252,38 +292,113 @@ class TestGreenAgentLifecycle:
     """Tests for GreenAgent lifecycle methods (startup, shutdown, cancel)."""
 
     @pytest.mark.asyncio
-    async def test_startup_raises_not_implemented(
+    async def test_startup_starts_ues_and_creates_client(
         self,
         config: GreenAgentConfig,
+        mock_ues_server_manager: MagicMock,
     ) -> None:
-        """startup() should raise NotImplementedError (stubbed)."""
-        # Create agent with mocked __init__
-        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
-            agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent.startup()
+        """startup() should start UES server and create client."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch("src.green.agent.UESServerManager", return_value=mock_ues_server_manager),
+            patch("ues.client.AsyncUESClient") as mock_client_cls,
+        ):
+            mock_factory.create.return_value = MagicMock()
+            mock_client = AsyncMock()
+            mock_client_cls.return_value = mock_client
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            await agent.startup()
+
+            mock_ues_server_manager.start.assert_awaited_once()
+            mock_client_cls.assert_called_once_with(
+                base_url=mock_ues_server_manager.base_url,
+                api_key=mock_ues_server_manager.admin_api_key,
+            )
+            assert agent.ues_client == mock_client
 
     @pytest.mark.asyncio
-    async def test_shutdown_raises_not_implemented(
+    async def test_shutdown_stops_ues_and_closes_client(
         self,
         config: GreenAgentConfig,
+        mock_ues_server_manager: MagicMock,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """shutdown() should raise NotImplementedError (stubbed)."""
-        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
-            agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent.shutdown()
+        """shutdown() should stop UES server and close client."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch("src.green.agent.UESServerManager", return_value=mock_ues_server_manager),
+        ):
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            agent.ues_client = mock_ues_client
+
+            await agent.shutdown()
+
+            mock_ues_client.close.assert_awaited_once()
+            mock_ues_server_manager.stop.assert_awaited_once()
+            assert agent.ues_client is None
 
     @pytest.mark.asyncio
-    async def test_cancel_raises_not_implemented(
+    async def test_shutdown_safe_to_call_multiple_times(
+        self,
+        config: GreenAgentConfig,
+        mock_ues_server_manager: MagicMock,
+    ) -> None:
+        """shutdown() should be safe to call multiple times."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch("src.green.agent.UESServerManager", return_value=mock_ues_server_manager),
+        ):
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            agent.ues_client = None  # Already None
+
+            # Should not raise
+            await agent.shutdown()
+            await agent.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_cancel_sets_cancelled_flag(
         self,
         config: GreenAgentConfig,
     ) -> None:
-        """cancel() should raise NotImplementedError (stubbed)."""
-        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
-            agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent.cancel("task-123")
+        """cancel() should set the cancelled flag for matching task."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch("src.green.agent.UESServerManager"),
+        ):
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            agent._current_task_id = "task-123"
+            agent._cancelled = False
+
+            await agent.cancel("task-123")
+
+            assert agent._cancelled is True
+
+    @pytest.mark.asyncio
+    async def test_cancel_ignores_non_matching_task(
+        self,
+        config: GreenAgentConfig,
+    ) -> None:
+        """cancel() should ignore requests for non-matching task IDs."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch("src.green.agent.UESServerManager"),
+        ):
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            agent._current_task_id = "task-123"
+            agent._cancelled = False
+
+            await agent.cancel("other-task")
+
+            assert agent._cancelled is False
 
 
 # =============================================================================

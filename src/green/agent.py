@@ -204,7 +204,37 @@ class GreenAgent:
             config: Green agent configuration with LLM model names,
                 default turn settings, and other parameters.
         """
-        raise NotImplementedError
+        self.config = config
+        self.ues_port = ues_port
+
+        # Create LLM instances (long-lived, persist across assessments)
+        self.response_llm: BaseChatModel = LLMFactory.create(
+            config.response_generator_model,
+            temperature=0.7,
+        )
+        self.evaluation_llm: BaseChatModel = LLMFactory.create(
+            config.evaluation_model,
+            temperature=0.0,
+        )
+
+        # UES client is set during startup()
+        self.ues_client: AsyncUESClient | None = None
+
+        # UES server manager (handles subprocess lifecycle)
+        self._ues_server = UESServerManager(port=ues_port)
+        self._ues_port = ues_port
+        self._proctor_api_key = self._ues_server.admin_api_key
+
+        # Cancellation tracking
+        self._current_task_id: str | None = None
+        self._cancelled = False
+
+        logger.info(
+            "GreenAgent initialized: ues_port=%d, response_model=%s, eval_model=%s",
+            ues_port,
+            config.response_generator_model,
+            config.evaluation_model,
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -223,7 +253,20 @@ class GreenAgent:
             UESServerError: If the UES server fails to start.
             TimeoutError: If the UES server doesn't become ready in time.
         """
-        raise NotImplementedError
+        from ues.client import AsyncUESClient
+
+        logger.info("Starting UES server on port %d", self.ues_port)
+
+        # Start UES server subprocess
+        await self._ues_server.start()
+
+        # Create async UES client with proctor-level API key
+        self.ues_client = AsyncUESClient(
+            base_url=self._ues_server.base_url,
+            api_key=self._proctor_api_key,
+        )
+
+        logger.info("GreenAgent startup complete: ues_url=%s", self._ues_server.base_url)
 
     async def shutdown(self) -> None:
         """Stop UES server and clean up all resources.
@@ -234,7 +277,20 @@ class GreenAgent:
         After ``shutdown()``, this ``GreenAgent`` instance should not
         be reused.
         """
-        raise NotImplementedError
+        logger.info("Shutting down GreenAgent (ues_port=%d)", self.ues_port)
+
+        # Close the UES client if it exists
+        if self.ues_client is not None:
+            try:
+                await self.ues_client.close()
+            except Exception:
+                logger.exception("Error closing UES client")
+            self.ues_client = None
+
+        # Stop the UES server subprocess
+        await self._ues_server.stop()
+
+        logger.info("GreenAgent shutdown complete")
 
     async def cancel(self, task_id: str) -> None:
         """Request cancellation of an ongoing assessment.
