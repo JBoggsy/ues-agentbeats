@@ -594,8 +594,27 @@ class GreenAgent:
         Args:
             scenario: Scenario configuration containing the
                 ``initial_state`` to load into UES.
+
+        Raises:
+            httpx.HTTPStatusError: If the scenario import fails.
         """
-        raise NotImplementedError
+        import httpx
+
+        # Clear UES state (removes all events and modality states)
+        await self.ues_client.simulation.clear()
+
+        # Load scenario initial state via direct HTTP (no client method)
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"http://127.0.0.1:{self._ues_port}/scenario/import/full",
+                headers={"X-API-Key": self._proctor_api_key},
+                json={"scenario": scenario.initial_state},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+
+        # Start simulation with manual time control (Green advances time)
+        await self.ues_client.simulation.start(auto_advance=False)
 
     # ------------------------------------------------------------------
     # State management (private)
