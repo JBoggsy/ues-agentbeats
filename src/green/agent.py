@@ -250,7 +250,15 @@ class GreenAgent:
             task_id: The task ID of the assessment to cancel. Must match
                 the ``task_id`` passed to the active ``run()`` call.
         """
-        raise NotImplementedError
+        if self._current_task_id == task_id:
+            logger.info("Cancellation requested for task %s", task_id)
+            self._cancelled = True
+        else:
+            logger.debug(
+                "Ignoring cancellation request for task %s (current task: %s)",
+                task_id,
+                self._current_task_id,
+            )
 
     # ------------------------------------------------------------------
     # Main entry point
