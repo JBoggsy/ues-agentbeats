@@ -37,4 +37,5 @@ markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "ollama: marks tests that require local Ollama server",
     "openai: marks tests that require OpenAI API key",
+    "slow: marks tests as slow (e.g., starting real UES servers)",
 ]
