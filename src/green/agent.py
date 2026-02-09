@@ -304,7 +304,200 @@ class GreenAgent:
         Raises:
             RuntimeError: If ``startup()`` has not been called.
         """
-        raise NotImplementedError
+        if self.ues_client is None:
+            raise RuntimeError("startup() must be called before run()")
+
+        # Track start time for duration calculation
+        start_time = datetime.now(timezone.utc)
+        assessment_id = str(uuid.uuid4())
+
+        # Mark this assessment as active for cancellation support
+        self._current_task_id = task_id
+        self._cancelled = False
+
+        user_key_id: str | None = None
+
+        try:
+            # === Phase 1: Setup ===
+            await emitter.assessment_started(
+                assessment_id=assessment_id,
+                scenario_id=scenario.scenario_id,
+                participant_url=purple_client.agent_url,
+                start_time=start_time,
+            )
+
+            # Reset UES and load scenario
+            await self._setup_ues(scenario)
+
+            # Create user API key for Purple
+            user_api_key, user_key_id = await self._create_user_api_key(assessment_id)
+
+            # Create per-assessment helpers
+            action_log_builder = ActionLogBuilder(purple_agent_id=user_key_id)
+            message_collector = NewMessageCollector(client=self.ues_client)
+            response_generator = ResponseGenerator(
+                client=self.ues_client,
+                scenario_config=scenario,
+                response_llm=self.response_llm,
+                summarization_llm=self.response_llm,
+            )
+            criteria_judge = CriteriaJudge(
+                llm=self.evaluation_llm,
+                criteria=scenario.criteria,
+                evaluators=evaluators,
+                emitter=emitter,
+            )
+
+            # Initialize message collector
+            time_state = await self.ues_client.time.get_state()
+            await message_collector.initialize(time_state.current_time)
+
+            # Capture initial state
+            initial_state = await self._capture_state_snapshot()
+
+            # Emit scenario loaded update
+            await emitter.scenario_loaded(
+                scenario_id=scenario.scenario_id,
+                scenario_name=scenario.name,
+                criteria_count=len(scenario.criteria),
+                character_count=len(scenario.characters),
+            )
+
+            # === Phase 2: Send Start to Purple ===
+            initial_summary = await self._build_initial_state_summary()
+            ues_url = f"http://127.0.0.1:{self.ues_port}"
+            await self._send_assessment_start(
+                purple_client=purple_client,
+                scenario=scenario,
+                initial_summary=initial_summary,
+                ues_url=ues_url,
+                api_key=user_api_key,
+            )
+
+            # === Phase 3: Turn Loop ===
+            max_turns = assessment_config.get("max_turns", self.config.default_max_turns)
+            turn = 0
+            completion_reason = "scenario_complete"
+
+            while turn < max_turns and not self._cancelled:
+                turn += 1
+
+                turn_result = await self._run_turn(
+                    turn=turn,
+                    emitter=emitter,
+                    purple_client=purple_client,
+                    action_log_builder=action_log_builder,
+                    message_collector=message_collector,
+                    response_generator=response_generator,
+                )
+
+                if turn_result.early_completion:
+                    completion_reason = "early_completion"
+                    break
+
+                if turn_result.error:
+                    logger.warning(
+                        "Turn %d encountered error: %s", turn, turn_result.error
+                    )
+
+            if self._cancelled:
+                completion_reason = "cancelled"
+            elif turn >= max_turns and completion_reason == "scenario_complete":
+                completion_reason = "max_turns_reached"
+
+            # === Phase 4: Evaluation ===
+            dimensions = criteria_judge.get_dimensions()
+            await emitter.evaluation_started(
+                criteria_count=len(scenario.criteria),
+                dimensions=dimensions,
+            )
+
+            final_state = await self._capture_state_snapshot()
+
+            eval_context = AgentBeatsEvalContext(
+                client=self.ues_client,
+                scenario_config=scenario.model_dump(),
+                action_log=action_log_builder.get_log(),
+                initial_state=initial_state,
+                final_state=final_state,
+                user_prompt=scenario.user_prompt,
+            )
+
+            criteria_results = await criteria_judge.evaluate_all(eval_context)
+            scores = criteria_judge.aggregate_scores(criteria_results)
+
+            # === Phase 5: Completion ===
+            # Map completion_reason to valid AssessmentCompleteMessage reason
+            complete_reason_map = {
+                "scenario_complete": "scenario_complete",
+                "early_completion": "early_completion",
+                "max_turns_reached": "scenario_complete",
+                "cancelled": "error",
+            }
+            await self._send_assessment_complete(
+                purple_client, complete_reason_map.get(completion_reason, "error")
+            )
+
+            # Revoke user API key
+            if user_key_id:
+                await self._revoke_user_api_key(user_key_id)
+
+            # Build results
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+            action_log = action_log_builder.get_log()
+
+            results = self._build_results(
+                assessment_id=assessment_id,
+                scenario=scenario,
+                scores=scores,
+                criteria_results=criteria_results,
+                action_log=action_log,
+                turns_completed=turn,
+                duration=duration,
+                status="completed" if completion_reason != "cancelled" else "cancelled",
+            )
+
+            # Map completion_reason to valid emitter reason
+            emitter_reason_map = {
+                "scenario_complete": "scenario_complete",
+                "early_completion": "early_completion",
+                "max_turns_reached": "scenario_complete",
+                "cancelled": "error",
+            }
+
+            await emitter.assessment_completed(
+                reason=emitter_reason_map.get(completion_reason, "scenario_complete"),
+                total_turns=turn,
+                total_actions=len(action_log),
+                duration_seconds=duration,
+                overall_score=scores.overall.score,
+                max_score=scores.overall.max_score,
+            )
+
+            return results
+
+        except Exception as e:
+            logger.exception("Assessment failed with error: %s", e)
+
+            # Try to revoke API key on error
+            if user_key_id:
+                try:
+                    await self._revoke_user_api_key(user_key_id)
+                except Exception:
+                    pass
+
+            # Emit error update
+            await emitter.error_occurred(
+                error_type="internal_error",
+                error_message=str(e),
+                recoverable=False,
+                context={"assessment_id": assessment_id, "task_id": task_id},
+            )
+
+            raise
+
+        finally:
+            self._current_task_id = None
 
     # ------------------------------------------------------------------
     # Turn orchestration (private)
