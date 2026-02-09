@@ -613,7 +613,22 @@ class GreenAgent:
             ``"chat"``, and ``"time"``, each containing the serialized
             modality state.
         """
-        raise NotImplementedError
+        email_state, sms_state, calendar_state, chat_state, time_state = (
+            await asyncio.gather(
+                self.ues_client.email.get_state(),
+                self.ues_client.sms.get_state(),
+                self.ues_client.calendar.get_state(),
+                self.ues_client.chat.get_state(),
+                self.ues_client.time.get_state(),
+            )
+        )
+        return {
+            "email": email_state.model_dump(mode="json"),
+            "sms": sms_state.model_dump(mode="json"),
+            "calendar": calendar_state.model_dump(mode="json"),
+            "chat": chat_state.model_dump(mode="json"),
+            "time": time_state.model_dump(mode="json"),
+        }
 
     async def _build_initial_state_summary(self) -> InitialStateSummary:
         """Build a summary of the initial UES state for the Purple agent.
@@ -627,9 +642,44 @@ class GreenAgent:
             An ``InitialStateSummary`` with email, SMS, calendar, and
             chat summaries.
         """
-        raise NotImplementedError
+        email_state, sms_state, calendar_state, chat_state, time_state = (
+            await asyncio.gather(
+                self.ues_client.email.get_state(),
+                self.ues_client.sms.get_state(),
+                self.ues_client.calendar.get_state(),
+                self.ues_client.chat.get_state(),
+                self.ues_client.time.get_state(),
+            )
+        )
 
-    def _count_events_today(self, calendar_state: Any) -> int:
+        return InitialStateSummary(
+            email=EmailSummary(
+                total_emails=email_state.total_email_count,
+                total_threads=len(email_state.threads),
+                unread=email_state.unread_count,
+                draft_count=len(email_state.folders.get("drafts", [])),
+            ),
+            sms=SMSSummary(
+                total_messages=sms_state.total_message_count,
+                total_conversations=len(sms_state.conversations),
+                unread=sms_state.unread_count,
+            ),
+            calendar=CalendarSummary(
+                event_count=len(calendar_state.events),
+                calendar_count=len(calendar_state.calendars),
+                events_today=self._count_events_today(
+                    calendar_state, time_state.current_time
+                ),
+            ),
+            chat=ChatSummary(
+                total_messages=chat_state.total_message_count,
+                conversation_count=chat_state.conversation_count,
+            ),
+        )
+
+    def _count_events_today(
+        self, calendar_state: Any, current_time: datetime | str
+    ) -> int:
         """Count the number of calendar events scheduled for today.
 
         Compares each event's start time against the current simulation
@@ -637,11 +687,33 @@ class GreenAgent:
 
         Args:
             calendar_state: The calendar modality state object from UES.
+                Expected to have an ``events`` attribute (dict of event_id
+                to CalendarEvent) where each event has a ``start`` datetime.
+            current_time: The current simulation time from UES. Used to
+                determine what "today" means for the count.
 
         Returns:
             Number of events whose start time falls on today's date.
         """
-        raise NotImplementedError
+        if not calendar_state.events:
+            return 0
+
+        # Parse current_time if it's a string
+        if isinstance(current_time, str):
+            current_time = datetime.fromisoformat(current_time.replace("Z", "+00:00"))
+
+        today_date = current_time.date()
+        today_count = 0
+
+        for event in calendar_state.events.values():
+            event_start = event.start
+            if isinstance(event_start, str):
+                event_start = datetime.fromisoformat(event_start.replace("Z", "+00:00"))
+
+            if event_start.date() == today_date:
+                today_count += 1
+
+        return today_count
 
     # ------------------------------------------------------------------
     # Response scheduling (private)
