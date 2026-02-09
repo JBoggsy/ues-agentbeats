@@ -463,6 +463,7 @@ class GreenAgent:
                 turns_completed=turn,
                 duration=duration,
                 status="completed" if completion_reason != "cancelled" else "cancelled",
+                participant=purple_client.agent_url,
             )
 
             # Map completion_reason to valid emitter reason
@@ -1355,6 +1356,7 @@ class GreenAgent:
         turns_completed: int,
         duration: float,
         status: str,
+        participant: str,
     ) -> AssessmentResults:
         """Build the final ``AssessmentResults`` artifact.
 
@@ -1372,12 +1374,35 @@ class GreenAgent:
                 assessment ended.
             duration: Total assessment duration in seconds.
             status: Final assessment status (``"completed"``,
-                ``"cancelled"``, ``"failed"``).
+                ``"cancelled"``, ``"failed"``). Mapped to valid
+                ``AssessmentStatus`` values.
+            participant: Identifier for the Purple agent that was
+                assessed (e.g., the agent's URL).
 
         Returns:
             A fully-populated ``AssessmentResults`` instance.
         """
-        raise NotImplementedError
+        # Map status to valid AssessmentStatus ("completed", "failed", "timeout")
+        status_map = {
+            "completed": "completed",
+            "cancelled": "failed",
+            "failed": "failed",
+            "timeout": "timeout",
+        }
+        mapped_status = status_map.get(status, "failed")
+
+        return AssessmentResults(
+            assessment_id=assessment_id,
+            scenario_id=scenario.scenario_id,
+            participant=participant,
+            status=mapped_status,  # type: ignore[arg-type]
+            duration_seconds=duration,
+            turns_taken=turns_completed,
+            actions_taken=len(action_log),
+            scores=scores,
+            criteria_results=criteria_results,
+            action_log=action_log,
+        )
 
     # ------------------------------------------------------------------
     # Health monitoring (private)
