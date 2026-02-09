@@ -344,7 +344,94 @@ class GreenAgent:
             actions taken, events processed, and whether early
             completion was requested.
         """
-        raise NotImplementedError
+        # Get current time before turn
+        time_state = await self.ues_client.time.get_state()
+        turn_start_time = time_state.current_time
+
+        # Step 1: Send TurnStart to Purple
+        await emitter.turn_started(
+            turn_number=turn,
+            current_time=turn_start_time,
+            events_pending=0,
+        )
+
+        turn_start_msg = TurnStartMessage(
+            turn_number=turn,
+            current_time=turn_start_time,
+            events_processed=0,
+        )
+
+        # Step 2: Wait for Purple's response
+        try:
+            response = await self._send_and_wait_purple(
+                purple_client=purple_client,
+                message=turn_start_msg,
+                timeout=self.config.default_turn_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Turn {turn} timed out waiting for Purple")
+            await emitter.turn_completed(
+                turn_number=turn,
+                actions_taken=0,
+                time_advanced="PT0S",
+                early_completion_requested=False,
+            )
+            return TurnResult(
+                turn_number=turn,
+                actions_taken=0,
+                time_step="PT0S",
+                events_processed=0,
+                early_completion=False,
+                error="timeout",
+            )
+
+        # Check for early completion
+        if isinstance(response, EarlyCompletionMessage):
+            await emitter.turn_completed(
+                turn_number=turn,
+                actions_taken=0,
+                time_advanced="PT0S",
+                early_completion_requested=True,
+            )
+            return TurnResult(
+                turn_number=turn,
+                actions_taken=0,
+                time_step="PT0S",
+                events_processed=0,
+                early_completion=True,
+                notes=response.reason,
+            )
+
+        # Response is TurnCompleteMessage
+        turn_complete_msg = response
+        time_step = turn_complete_msg.time_step or "PT1H"
+
+        # Step 3: End-of-turn processing
+        end_of_turn = await self._process_turn_end(
+            turn=turn,
+            turn_start_time=turn_start_time,
+            time_step=time_step,
+            emitter=emitter,
+            action_log_builder=action_log_builder,
+            message_collector=message_collector,
+            response_generator=response_generator,
+        )
+
+        await emitter.turn_completed(
+            turn_number=turn,
+            actions_taken=end_of_turn.actions_taken,
+            time_advanced=time_step,
+            early_completion_requested=False,
+        )
+
+        return TurnResult(
+            turn_number=turn,
+            actions_taken=end_of_turn.actions_taken,
+            time_step=time_step,
+            events_processed=end_of_turn.total_events,
+            early_completion=False,
+            notes=turn_complete_msg.notes,
+        )
 
     async def _process_turn_end(
         self,
