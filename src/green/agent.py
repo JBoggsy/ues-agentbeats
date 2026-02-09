@@ -476,7 +476,31 @@ class GreenAgent:
             TimeoutError: If Purple doesn't respond within ``timeout``.
             ValueError: If the response ``message_type`` is unexpected.
         """
-        raise NotImplementedError
+        from a2a.types import DataPart, Message, Part, Role
+
+        # Create A2A message with data payload
+        a2a_message = Message(
+            role=Role.user,
+            parts=[Part(root=DataPart(data=message.model_dump(mode="json")))],
+            message_id=str(uuid.uuid4()),
+        )
+
+        # Send and wait for response (blocking=True)
+        response = await asyncio.wait_for(
+            purple_client.send_message(a2a_message, blocking=True),
+            timeout=timeout,
+        )
+
+        # Parse response
+        response_data = self._extract_response_data(response)
+        message_type = response_data.get("message_type")
+
+        if message_type == "turn_complete":
+            return TurnCompleteMessage.model_validate(response_data)
+        elif message_type == "early_completion":
+            return EarlyCompletionMessage.model_validate(response_data)
+        else:
+            raise ValueError(f"Unexpected message type from Purple: {message_type}")
 
     def _extract_response_data(self, response: Any) -> dict[str, Any]:
         """Extract the data payload from an A2A response.
@@ -494,7 +518,58 @@ class GreenAgent:
         Raises:
             ValueError: If no ``DataPart`` is found in the response.
         """
-        raise NotImplementedError
+        from a2a.types import DataPart, Message, Task
+
+        # Handle Task response (most common for blocking=True)
+        if isinstance(response, Task):
+            # Task has artifacts or history - check artifacts first
+            if response.artifacts:
+                for artifact in response.artifacts:
+                    if artifact.parts:
+                        for part in artifact.parts:
+                            # Part is a discriminated union with root attribute
+                            part_data = part.root if hasattr(part, "root") else part
+                            if isinstance(part_data, DataPart):
+                                return part_data.data
+            # Check history messages
+            if response.history:
+                for msg in reversed(response.history):
+                    if msg.role.value == "agent" and msg.parts:
+                        for part in msg.parts:
+                            part_data = part.root if hasattr(part, "root") else part
+                            if isinstance(part_data, DataPart):
+                                return part_data.data
+            raise ValueError(
+                "No DataPart found in Task response artifacts or history"
+            )
+
+        # Handle Message response
+        if isinstance(response, Message):
+            if response.parts:
+                for part in response.parts:
+                    part_data = part.root if hasattr(part, "root") else part
+                    if isinstance(part_data, DataPart):
+                        return part_data.data
+            raise ValueError("No DataPart found in Message response parts")
+
+        # Try duck typing for unknown response types
+        if hasattr(response, "artifacts"):
+            for artifact in response.artifacts:
+                if hasattr(artifact, "parts") and artifact.parts:
+                    for part in artifact.parts:
+                        part_data = part.root if hasattr(part, "root") else part
+                        if hasattr(part_data, "data"):
+                            return part_data.data
+
+        if hasattr(response, "parts"):
+            for part in response.parts:
+                part_data = part.root if hasattr(part, "root") else part
+                if hasattr(part_data, "data"):
+                    return part_data.data
+
+        raise ValueError(
+            f"Unable to extract DataPart from response of type {type(response).__name__}"
+        )
 
     async def _send_assessment_start(
         self,
@@ -520,7 +595,28 @@ class GreenAgent:
             api_key: User-level API key secret for Purple to authenticate
                 with UES.
         """
-        raise NotImplementedError
+        # Get current simulation time
+        time_state = await self.ues_client.time.get_state()
+
+        message = AssessmentStartMessage(
+            ues_url=ues_url,
+            api_key=api_key,
+            assessment_instructions=scenario.user_prompt,
+            current_time=time_state.current_time,
+            initial_state_summary=initial_summary,
+        )
+
+        # Send as a fire-and-forget message (no response expected)
+        await purple_client.send_data(
+            data=message.model_dump(mode="json"),
+            blocking=False,
+        )
+
+        logger.debug(
+            "Sent AssessmentStartMessage to Purple: ues_url=%s, current_time=%s",
+            ues_url,
+            time_state.current_time,
+        )
 
     async def _send_assessment_complete(
         self,
@@ -538,7 +634,27 @@ class GreenAgent:
                 ``"scenario_complete"``, ``"early_completion"``,
                 ``"max_turns_reached"``, or ``"cancelled"``.
         """
-        raise NotImplementedError
+        # Map "max_turns_reached" or "cancelled" to valid AssessmentCompleteMessage reasons
+        # Valid reasons: "scenario_complete", "early_completion", "timeout", "error"
+        reason_mapping = {
+            "scenario_complete": "scenario_complete",
+            "early_completion": "early_completion",
+            "max_turns_reached": "timeout",
+            "cancelled": "timeout",
+            "timeout": "timeout",
+            "error": "error",
+        }
+        mapped_reason = reason_mapping.get(reason, "timeout")
+
+        message = AssessmentCompleteMessage(reason=mapped_reason)
+
+        # Send as fire-and-forget (no response expected)
+        await purple_client.send_data(
+            data=message.model_dump(mode="json"),
+            blocking=False,
+        )
+
+        logger.debug("Sent AssessmentCompleteMessage to Purple: reason=%s", reason)
 
     # ------------------------------------------------------------------
     # API key management (private)
