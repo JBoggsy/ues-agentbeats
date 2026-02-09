@@ -1512,7 +1512,6 @@ src/green/
 | 8 | Implement `_process_turn_end()` | Steps 4-7 | 1.5h |
 | 9 | Implement `_run_turn()` | `_process_turn_end`, Purple comm | 1.5h |
 | 10 | Implement `run()` main flow | `_run_turn`, CriteriaJudge | 2h |
-| 10 | Implement `startup()` and `shutdown()` | UES server management | 1h |
 | 11 | Implement `cancel()` | Turn loop cancellation | 0.5h |
 | 12 | Add error handling throughout | All | 1h |
 | 13 | Write unit tests | pytest, mocking | 4h |
