@@ -488,20 +488,93 @@ class TestTimeManagement:
     """Tests for time management methods (_advance_time, _advance_remainder)."""
 
     @pytest.mark.asyncio
-    async def test_advance_time_raises_not_implemented(self) -> None:
-        """_advance_time() should raise NotImplementedError (stubbed)."""
+    async def test_advance_time_parses_duration_and_advances(self) -> None:
+        """_advance_time() parses ISO 8601 duration and calls UES client."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._advance_time("PT1H")
+            # Mock the UES client
+            mock_client = MagicMock()
+            mock_advance_result = MagicMock()
+            mock_advance_result.events_executed = 5
+            mock_client.time.advance = AsyncMock(return_value=mock_advance_result)
+            agent.ues_client = mock_client
+
+            result = await agent._advance_time("PT1H")
+
+            # Verify correct seconds were passed (1 hour = 3600 seconds)
+            mock_client.time.advance.assert_called_once_with(seconds=3600)
+            assert result.events_executed == 5
 
     @pytest.mark.asyncio
-    async def test_advance_remainder_raises_not_implemented(self) -> None:
-        """_advance_remainder() should raise NotImplementedError (stubbed)."""
+    async def test_advance_time_handles_various_durations(self) -> None:
+        """_advance_time() correctly parses various ISO 8601 durations."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._advance_remainder("PT1H", apply_seconds=1)
+            mock_client = MagicMock()
+            mock_client.time.advance = AsyncMock(return_value=MagicMock(events_executed=0))
+            agent.ues_client = mock_client
+
+            # Test various durations
+            test_cases = [
+                ("PT1S", 1),
+                ("PT30M", 1800),
+                ("PT1H30M", 5400),
+                ("P1D", 86400),
+            ]
+            for duration_str, expected_seconds in test_cases:
+                mock_client.time.advance.reset_mock()
+                await agent._advance_time(duration_str)
+                mock_client.time.advance.assert_called_once_with(seconds=expected_seconds)
+
+    @pytest.mark.asyncio
+    async def test_advance_remainder_calculates_correctly(self) -> None:
+        """_advance_remainder() computes (time_step - apply_seconds) and advances."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            mock_client = MagicMock()
+            mock_advance_result = MagicMock()
+            mock_advance_result.events_executed = 3
+            mock_client.time.advance = AsyncMock(return_value=mock_advance_result)
+            agent.ues_client = mock_client
+
+            result = await agent._advance_remainder("PT1H", apply_seconds=1)
+
+            # 1 hour (3600s) - 1s apply = 3599s remainder
+            mock_client.time.advance.assert_called_once_with(seconds=3599)
+            assert result.events_executed == 3
+
+    @pytest.mark.asyncio
+    async def test_advance_remainder_returns_zero_event_for_small_timestep(self) -> None:
+        """_advance_remainder() returns zero-event result when remainder <= 0."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            mock_client = MagicMock()
+            mock_client.time.advance = AsyncMock()
+            agent.ues_client = mock_client
+
+            # PT1S = 1 second, apply_seconds=1 → remainder=0
+            result = await agent._advance_remainder("PT1S", apply_seconds=1)
+
+            # Should NOT call ues_client.time.advance
+            mock_client.time.advance.assert_not_called()
+            # Should return a zero-event placeholder
+            assert result.events_executed == 0
+            assert result.events_failed == 0
+
+    @pytest.mark.asyncio
+    async def test_advance_remainder_handles_negative_remainder(self) -> None:
+        """_advance_remainder() returns zero-event result for negative remainder."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            mock_client = MagicMock()
+            mock_client.time.advance = AsyncMock()
+            agent.ues_client = mock_client
+
+            # PT0S = 0 seconds, apply_seconds=1 → remainder=-1 (negative)
+            result = await agent._advance_remainder("PT0S", apply_seconds=1)
+
+            mock_client.time.advance.assert_not_called()
+            assert result.events_executed == 0
 
 
 # =============================================================================

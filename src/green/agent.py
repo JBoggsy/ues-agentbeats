@@ -820,7 +820,12 @@ class GreenAgent:
             The ``AdvanceTimeResponse`` from UES, which includes the
             number of events executed during the advance.
         """
-        raise NotImplementedError
+        from src.green.scenarios.schema import parse_iso8601_duration
+
+        duration = parse_iso8601_duration(time_step)
+        seconds = int(duration.total_seconds())
+
+        return await self.ues_client.time.advance(seconds=seconds)
 
     async def _advance_remainder(
         self,
@@ -846,7 +851,26 @@ class GreenAgent:
             The ``AdvanceTimeResponse`` from UES, or a zero-event
             placeholder if no advancement was needed.
         """
-        raise NotImplementedError
+        from dataclasses import dataclass
+
+        from src.green.scenarios.schema import parse_iso8601_duration
+
+        duration = parse_iso8601_duration(time_step)
+        total_seconds = int(duration.total_seconds())
+        remainder_seconds = total_seconds - apply_seconds
+
+        if remainder_seconds <= 0:
+            # No advancement needed — return a zero-event placeholder
+            @dataclass
+            class ZeroAdvanceResult:
+                """Placeholder result when no time advancement is needed."""
+
+                events_executed: int = 0
+                events_failed: int = 0
+
+            return ZeroAdvanceResult()
+
+        return await self.ues_client.time.advance(seconds=remainder_seconds)
 
     # ------------------------------------------------------------------
     # Purple agent communication (private)
