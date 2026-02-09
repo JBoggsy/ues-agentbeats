@@ -930,12 +930,32 @@ class TestHealthMonitoring:
     """Tests for health monitoring methods."""
 
     @pytest.mark.asyncio
-    async def test_check_ues_health_raises_not_implemented(self) -> None:
-        """_check_ues_health() should raise NotImplementedError (stubbed)."""
+    async def test_check_ues_health_delegates_to_server_manager(self) -> None:
+        """_check_ues_health() delegates to UESServerManager.check_health()."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._check_ues_health()
+            mock_server = MagicMock()
+            mock_server.check_health = AsyncMock(return_value=True)
+            agent._ues_server = mock_server
+
+            result = await agent._check_ues_health()
+
+            assert result is True
+            mock_server.check_health.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_check_ues_health_returns_false_when_unhealthy(self) -> None:
+        """_check_ues_health() returns False when UES server is unhealthy."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            mock_server = MagicMock()
+            mock_server.check_health = AsyncMock(return_value=False)
+            agent._ues_server = mock_server
+
+            result = await agent._check_ues_health()
+
+            assert result is False
+            mock_server.check_health.assert_awaited_once()
 
 
 # =============================================================================

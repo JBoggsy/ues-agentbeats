@@ -1498,4 +1498,4 @@ class GreenAgent:
             ``True`` if the UES process is alive and the ``/health``
             endpoint returns HTTP 200; ``False`` otherwise.
         """
-        raise NotImplementedError
+        return await self._ues_server.check_health()
