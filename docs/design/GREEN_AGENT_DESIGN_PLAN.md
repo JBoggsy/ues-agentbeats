@@ -4,7 +4,7 @@ This document provides the comprehensive design for the `GreenAgent` class (Phas
 
 **Date**: February 7, 2026  
 **Last Updated**: February 9, 2026  
-**Status**: 🔄 IMPLEMENTATION IN PROGRESS
+**Status**: ✅ IMPLEMENTATION COMPLETE
 
 ---
 
@@ -1264,23 +1264,25 @@ async def _setup_ues(self, scenario: ScenarioConfig) -> None:
     """Reset UES and load scenario initial state.
     
     Args:
-        scenario: Scenario configuration with initial_state.
+        scenario: Scenario configuration containing the
+            initial_state to load into UES. Must be a full
+            UES scenario export dict with metadata,
+            environment, and events sections.
+
+    Raises:
+        Exception: If the scenario import fails (e.g., validation
+            error from UES).
     """
-    import httpx
-    
-    # Clear UES state
+    # Clear UES state (removes all events and modality states)
     await self.ues_client.simulation.clear()
-    
-    # Load scenario initial state via direct HTTP (no client method)
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"http://127.0.0.1:{self._ues_port}/scenario/import/full",
-            headers={"X-API-Key": self._proctor_api_key},
-            json={"scenario": scenario.initial_state},
-        )
-        response.raise_for_status()
-    
-    # Start simulation
+
+    # Load scenario initial state via client library
+    await self.ues_client.scenario.import_full(
+        scenario=scenario.initial_state,
+        strict_modalities=False,
+    )
+
+    # Start simulation with manual time control (Green advances time)
     await self.ues_client.simulation.start(auto_advance=False)
 ```
 
@@ -1458,13 +1460,12 @@ GreenAgent
 
 | Dependency | Version | Purpose |
 |------------|---------|---------|
-| `ues` | local | User Environment Simulator |
+| `ues` | local (editable) | User Environment Simulator |
 | `a2a-python` | ^0.x | A2A protocol SDK |
 | `langchain-core` | ^0.x | LLM abstraction |
 | `langchain-openai` | ^0.x | OpenAI LLMs |
 | `langchain-anthropic` | ^0.x | Claude LLMs |
 | `langchain-google-genai` | ^0.x | Gemini LLMs |
-| `httpx` | ^0.x | HTTP client |
 | `pydantic` | ^2.x | Data validation |
 
 ---
@@ -1514,40 +1515,56 @@ src/green/
 | 9 | ~~Implement `_run_turn()`~~ | `_process_turn_end`, Purple comm | ✅ Done |
 | 10 | ~~Implement `run()` main flow~~ | `_run_turn`, CriteriaJudge | ✅ Done |
 | 11 | ~~Implement `cancel()`~~ | Turn loop cancellation | ✅ Done |
-| 12 | Implement `__init__()`, `startup()`, `shutdown()` | UESServerManager, LLMFactory | ❌ Stub |
-| 13 | Implement `_advance_time()`, `_advance_remainder()` | UES time API | ❌ Stub |
-| 14 | Implement `_build_results()` | AssessmentResults | ❌ Stub |
+| 12 | ~~Implement `__init__()`, `startup()`, `shutdown()`~~ | UESServerManager, LLMFactory | ✅ Done |
+| 13 | ~~Implement `_advance_time()`, `_advance_remainder()`~~ | UES time API | ✅ Done |
+| 14 | ~~Implement `_build_results()`~~ | AssessmentResults | ✅ Done |
 | 15 | ~~Implement `_check_ues_health()`~~ | UES health endpoint | ✅ Done |
 | 16 | ~~Write unit tests~~ | pytest, mocking | ✅ Done (4 files, ~2,305 lines) |
 | 17 | ~~Write integration tests~~ | Real UES instance | ✅ Done (1 file, ~1,002 lines) |
 
-**Progress**: 14/17 steps complete. 3 methods remain as stubs.
+**Progress**: 17/17 steps complete. All methods implemented.
 
 ### 16.3 Testing Strategy
 
 **Unit Tests** (✅ implemented):
-- `test_agent.py` (972 lines) — unit tests for `run()`, `_run_turn()`, `cancel()`, full assessment flow
-- `test_agent_api_keys.py` (456 lines) — `_create_user_api_key()`, `_revoke_user_api_key()`
-- `test_agent_purple_comm.py` (507 lines) — `_send_and_wait_purple()`, `_extract_response_data()`, `_send_assessment_start()`, `_send_assessment_complete()`
-- `test_agent_ues_setup.py` (321 lines) — `_setup_ues()` scenario import and simulation control
-- `test_response_scheduling.py` (370 lines) — `_schedule_response()` and modality-specific scheduling
+- `test_agent.py` (~2,500 lines) — unit tests for all 22 methods: init, lifecycle, run/turn/cancel, time management, result building, health monitoring
+- `test_agent_api_keys.py` (~300 lines) — `_create_user_api_key()`, `_revoke_user_api_key()`
+- `test_agent_purple_comm.py` (~500 lines) — `_send_and_wait_purple()`, `_extract_response_data()`, `_send_assessment_start()`, `_send_assessment_complete()`
+- `test_agent_ues_setup.py` (~230 lines) — `_setup_ues()` scenario import and simulation control
+- `test_response_scheduling.py` (~340 lines) — `_schedule_response()` and modality-specific scheduling
 
 **Integration Tests** (✅ implemented):
-- `test_agent_integration.py` (1,002 lines) — full assessment flow with mocked UES/Purple
+- `test_agent_integration.py` (~1,786 lines) — full assessment flow with mocked UES/Purple
+
+**Real UES Tests** (✅ implemented):
+- `test_agent_real_ues.py` — Tests exercising the GreenAgent against a real UES server
+  subprocess with mocked LLMs and mock Purple clients. Validates correctness of
+  the GreenAgent↔UES interaction layer without requiring LLM API keys.
 
 **Edge Cases Covered**:
 - Purple timeout ✅
 - Purple early completion ✅
 - Max turns reached ✅
 - Cancellation mid-turn ✅
+- UES server crash during turn loop ✅
+- Empty scenario (no actions required) ✅
+- API key creation failure path ✅
+- Cancellation mid-turn-loop produces correct result ✅
 
-**Edge Cases Still Needed**:
-- UES server crash
-- Empty scenario (no actions required)
-- High-volume scenario (many messages)
-- UES server crash
-- Empty scenario (no actions required)
-- High-volume scenario (many messages)
+**Real UES Tests Covered** (marked `@pytest.mark.slow`):
+- Two-phase time advancement with event execution ✅
+- API key permissions enforcement (user vs proctor) ✅
+- Response scheduling creates visible modality state (email, SMS, calendar) ✅
+- Event listing with agent_id filtering ✅
+- Scenario import, clear, and restart cycle ✅
+- Full assessment flow with real UES + mocked LLMs ✅
+
+**Edge Cases NOT Added** (intentionally omitted):
+- High-volume scenario: Performance concern, not a correctness gap. Better handled with benchmarks.
+- Concurrent `run()` calls: Design explicitly states one assessment per agent; testing undefined behavior is unproductive.
+- `_count_events_today` mixed timezones: Implementation uses `.date()` with proper timezone awareness; low edge value.
+- `_build_initial_state_summary` missing folders key: Trivial defensive `.get()` call; not worth a dedicated test.
+- `test_agent_api_keys.py` PartialGreenAgent divergence: Real methods are redundantly tested in `test_agent.py` and `test_agent_integration.py`.
 
 ---
 

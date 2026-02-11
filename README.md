@@ -50,7 +50,7 @@ src/
 │   └── response_generator.py # Character response generation (complete)
 └── purple/           # Purple agent template
 scenarios/            # Assessment scenarios
-tests/                # Test suite (768+ tests)
+tests/                # Test suite (1,424 tests)
 docs/                 # Documentation
 ```
 
@@ -68,6 +68,11 @@ docs/                 # Documentation
 - [Response Prompts](src/green/prompts/README.md)
 - [A2A Helpers](src/common/a2a/README.md)
 - [AgentBeats Helpers](src/common/agentbeats/README.md)
+
+## Dependencies
+
+- **UES**: Installed as a local editable dependency from `../ues/`. Ensure the UES repository is cloned adjacent to this project.
+- **pytest-dotenv**: Automatically loads `.env` during test runs.
 
 ## Environment Variables
 
@@ -93,7 +98,7 @@ OPENAI_API_KEY=sk-your-key-here
 - [x] Implement `src/common/agentbeats/config.py` - Configuration models
 - [x] Write tests for serialization/validation (237 tests passing)
 
-### Phase 3: Green Agent Implementation
+### Phase 3: Green Agent Implementation ✅ COMPLETE
 - [x] Implement scenario schema and loader (`src/green/scenarios/`)
 - [x] Implement LLM configuration factory (`src/green/llm_config.py`)
 - [x] Implement action log builder (`src/green/action_log.py`)
@@ -103,10 +108,10 @@ OPENAI_API_KEY=sk-your-key-here
 - [x] Implement LLM prompt templates (`src/green/prompts/`)
 - [x] Integrate LangChain for LLM-based response generation
 - [x] Write integration tests with Ollama and OpenAI
-- [ ] Implement assessment orchestrator (`src/green/assessment/orchestrator.py`)
-- [ ] Implement turn handler (`src/green/assessment/turn_handler.py`)
-- [ ] Implement criteria judge (`src/green/evaluation/`)
-- [ ] Create first complete scenario
+- [x] Implement assessment orchestrator (`src/green/agent.py`)
+- [x] Implement criteria judge (`src/green/evaluation/`)
+- [x] Implement GreenAgent with full turn loop, UES management, Purple communication
+- [x] Full test suite: 1,424 tests passing (0 failures, 0 skipped)
 
 ### Phase 4: Purple Agent Template
 - [ ] Implement base agent class (`src/purple/base_agent.py`)

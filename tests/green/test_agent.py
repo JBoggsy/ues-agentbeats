@@ -410,17 +410,17 @@ class TestGreenAgentRun:
     """Tests for GreenAgent.run() main entry point."""
 
     @pytest.mark.asyncio
-    async def test_run_raises_not_implemented(
+    async def test_run_raises_runtime_error_without_startup(
         self,
-        config: GreenAgentConfig,
         mock_emitter: AsyncMock,
         mock_scenario: MagicMock,
         mock_purple_client: AsyncMock,
     ) -> None:
-        """run() should raise NotImplementedError (stubbed)."""
+        """run() should raise RuntimeError if startup() was not called."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
+            agent.ues_client = None
+            with pytest.raises(RuntimeError, match="startup"):
                 await agent.run(
                     task_id="task-123",
                     emitter=mock_emitter,
@@ -440,43 +440,161 @@ class TestTurnOrchestration:
     """Tests for turn orchestration methods (_run_turn, _process_turn_end)."""
 
     @pytest.mark.asyncio
-    async def test_run_turn_raises_not_implemented(
-        self,
-        mock_emitter: AsyncMock,
-        mock_purple_client: AsyncMock,
-    ) -> None:
-        """_run_turn() should raise NotImplementedError (stubbed)."""
-        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
-            agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._run_turn(
-                    turn=1,
-                    emitter=mock_emitter,
-                    purple_client=mock_purple_client,
-                    action_log_builder=MagicMock(),
-                    message_collector=MagicMock(),
-                    response_generator=MagicMock(),
-                )
-
-    @pytest.mark.asyncio
-    async def test_process_turn_end_raises_not_implemented(
+    async def test_run_turn_sends_turn_start_and_waits(
         self,
         now: datetime,
         mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """_process_turn_end() should raise NotImplementedError (stubbed)."""
+        """_run_turn() should send TurnStart, wait for reply, and process turn end."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._process_turn_end(
-                    turn=1,
-                    turn_start_time=now,
-                    time_step="PT1H",
-                    emitter=mock_emitter,
-                    action_log_builder=MagicMock(),
-                    message_collector=MagicMock(),
-                    response_generator=MagicMock(),
+            agent.ues_client = mock_ues_client
+            agent.config = GreenAgentConfig(
+                default_turn_timeout=60.0,
+            )
+
+            # Purple replies with TurnCompleteMessage
+            turn_complete = TurnCompleteMessage(time_step="PT1H")
+            agent._send_and_wait_purple = AsyncMock(return_value=turn_complete)
+            agent._process_turn_end = AsyncMock(
+                return_value=EndOfTurnResult(
+                    actions_taken=2, total_events=5, responses_generated=1
                 )
+            )
+
+            result = await agent._run_turn(
+                turn=1,
+                emitter=mock_emitter,
+                purple_client=mock_purple_client,
+                action_log_builder=MagicMock(),
+                message_collector=MagicMock(),
+                response_generator=MagicMock(),
+            )
+
+            assert result.turn_number == 1
+            assert result.actions_taken == 2
+            assert result.events_processed == 5
+            assert result.early_completion is False
+            mock_emitter.turn_started.assert_awaited_once()
+            mock_emitter.turn_completed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_turn_handles_early_completion(
+        self,
+        now: datetime,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_run_turn() should return early_completion=True on EarlyCompletionMessage."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+            agent.config = GreenAgentConfig(default_turn_timeout=60.0)
+
+            early = EarlyCompletionMessage(reason="All tasks done")
+            agent._send_and_wait_purple = AsyncMock(return_value=early)
+
+            result = await agent._run_turn(
+                turn=1,
+                emitter=mock_emitter,
+                purple_client=mock_purple_client,
+                action_log_builder=MagicMock(),
+                message_collector=MagicMock(),
+                response_generator=MagicMock(),
+            )
+
+            assert result.early_completion is True
+            assert result.notes == "All tasks done"
+
+    @pytest.mark.asyncio
+    async def test_run_turn_handles_timeout(
+        self,
+        now: datetime,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_run_turn() should return error='timeout' on asyncio.TimeoutError."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+            agent.config = GreenAgentConfig(default_turn_timeout=60.0)
+
+            agent._send_and_wait_purple = AsyncMock(
+                side_effect=asyncio.TimeoutError()
+            )
+
+            result = await agent._run_turn(
+                turn=1,
+                emitter=mock_emitter,
+                purple_client=mock_purple_client,
+                action_log_builder=MagicMock(),
+                message_collector=MagicMock(),
+                response_generator=MagicMock(),
+            )
+
+            assert result.error == "timeout"
+            assert result.early_completion is False
+
+    @pytest.mark.asyncio
+    async def test_process_turn_end_orchestrates_all_phases(
+        self,
+        now: datetime,
+        mock_emitter: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_process_turn_end() should advance time, collect events, generate responses."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
+            # Mock the time advancement methods
+            agent._advance_time = AsyncMock(
+                return_value=MagicMock(events_executed=2)
+            )
+            agent._advance_remainder = AsyncMock(
+                return_value=MagicMock(events_executed=3)
+            )
+            agent._schedule_response = AsyncMock()
+
+            # Mock action_log_builder
+            mock_action_log = MagicMock()
+            mock_purple_entry = MagicMock(
+                timestamp=now, action="email.send",
+                parameters={}, success=True, error_message=None,
+            )
+            mock_action_log.add_events_from_turn.return_value = (
+                [mock_purple_entry], []
+            )
+
+            # Mock message_collector
+            mock_message_collector = MagicMock()
+            mock_message_collector.collect = AsyncMock(return_value=[])
+
+            # Mock response_generator
+            mock_response_gen = MagicMock()
+            mock_response_gen.process_new_messages = AsyncMock(return_value=[])
+
+            result = await agent._process_turn_end(
+                turn=1,
+                turn_start_time=now,
+                time_step="PT1H",
+                emitter=mock_emitter,
+                action_log_builder=mock_action_log,
+                message_collector=mock_message_collector,
+                response_generator=mock_response_gen,
+            )
+
+            assert result.actions_taken == 1
+            assert result.total_events == 5  # 2 + 3
+            assert result.responses_generated == 0
+            agent._advance_time.assert_awaited_once_with("PT1S")
+            agent._advance_remainder.assert_awaited_once_with(
+                time_step="PT1H", apply_seconds=1
+            )
 
 
 # =============================================================================
@@ -586,64 +704,255 @@ class TestPurpleCommunication:
     """Tests for Purple agent communication methods."""
 
     @pytest.mark.asyncio
-    async def test_send_and_wait_purple_raises_not_implemented(
+    async def test_send_and_wait_purple_parses_turn_complete(
         self,
         mock_purple_client: AsyncMock,
     ) -> None:
-        """_send_and_wait_purple() should raise NotImplementedError (stubbed)."""
+        """_send_and_wait_purple() should parse TurnCompleteMessage responses."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
+
+            from a2a.types import DataPart, Part, Task
+
+            response_data = {"message_type": "turn_complete", "time_step": "PT30M"}
+            mock_task = MagicMock(spec=Task)
+            mock_task.artifacts = [
+                MagicMock(parts=[Part(root=DataPart(data=response_data))])
+            ]
+            mock_task.history = None
+            mock_purple_client.send_message = AsyncMock(return_value=mock_task)
+
+            message = MagicMock()
+            message.model_dump.return_value = {"message_type": "turn_start"}
+
+            result = await agent._send_and_wait_purple(
+                purple_client=mock_purple_client,
+                message=message,
+                timeout=60.0,
+            )
+
+            assert isinstance(result, TurnCompleteMessage)
+            assert result.time_step == "PT30M"
+
+    @pytest.mark.asyncio
+    async def test_send_and_wait_purple_parses_early_completion(
+        self,
+        mock_purple_client: AsyncMock,
+    ) -> None:
+        """_send_and_wait_purple() should parse EarlyCompletionMessage responses."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            from a2a.types import DataPart, Part, Task
+
+            response_data = {
+                "message_type": "early_completion",
+                "reason": "All done",
+            }
+            mock_task = MagicMock(spec=Task)
+            mock_task.artifacts = [
+                MagicMock(parts=[Part(root=DataPart(data=response_data))])
+            ]
+            mock_task.history = None
+            mock_purple_client.send_message = AsyncMock(return_value=mock_task)
+
+            message = MagicMock()
+            message.model_dump.return_value = {"message_type": "turn_start"}
+
+            result = await agent._send_and_wait_purple(
+                purple_client=mock_purple_client,
+                message=message,
+                timeout=60.0,
+            )
+
+            assert isinstance(result, EarlyCompletionMessage)
+            assert result.reason == "All done"
+
+    @pytest.mark.asyncio
+    async def test_send_and_wait_purple_raises_on_unexpected_type(
+        self,
+        mock_purple_client: AsyncMock,
+    ) -> None:
+        """_send_and_wait_purple() should raise ValueError on unknown message_type."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            from a2a.types import DataPart, Part, Task
+
+            response_data = {"message_type": "unknown_type"}
+            mock_task = MagicMock(spec=Task)
+            mock_task.artifacts = [
+                MagicMock(parts=[Part(root=DataPart(data=response_data))])
+            ]
+            mock_task.history = None
+            mock_purple_client.send_message = AsyncMock(return_value=mock_task)
+
+            message = MagicMock()
+            message.model_dump.return_value = {"message_type": "turn_start"}
+
+            with pytest.raises(ValueError, match="Unexpected message type"):
                 await agent._send_and_wait_purple(
                     purple_client=mock_purple_client,
-                    message=MagicMock(),
+                    message=message,
                     timeout=60.0,
                 )
 
-    def test_extract_response_data_raises_not_implemented(self) -> None:
-        """_extract_response_data() should raise NotImplementedError (stubbed)."""
+    @pytest.mark.asyncio
+    async def test_send_and_wait_purple_raises_on_timeout(
+        self,
+        mock_purple_client: AsyncMock,
+    ) -> None:
+        """_send_and_wait_purple() should propagate TimeoutError."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                agent._extract_response_data(MagicMock())
+
+            async def slow_send(*args, **kwargs):
+                await asyncio.sleep(10)
+
+            mock_purple_client.send_message = AsyncMock(side_effect=slow_send)
+
+            message = MagicMock()
+            message.model_dump.return_value = {"message_type": "turn_start"}
+
+            with pytest.raises(asyncio.TimeoutError):
+                await agent._send_and_wait_purple(
+                    purple_client=mock_purple_client,
+                    message=message,
+                    timeout=0.01,
+                )
+
+    def test_extract_response_data_from_task_with_artifacts(self) -> None:
+        """_extract_response_data() should extract data from Task artifacts."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            from a2a.types import DataPart, Part, Task
+
+            expected_data = {"message_type": "turn_complete", "time_step": "PT1H"}
+            mock_task = MagicMock(spec=Task)
+            mock_task.artifacts = [
+                MagicMock(parts=[Part(root=DataPart(data=expected_data))])
+            ]
+            mock_task.history = None
+
+            result = agent._extract_response_data(mock_task)
+            assert result == expected_data
+
+    def test_extract_response_data_from_task_history(self) -> None:
+        """_extract_response_data() should extract data from Task history."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            from a2a.types import DataPart, Message, Part, Role, Task
+
+            expected_data = {"message_type": "turn_complete"}
+            mock_task = MagicMock(spec=Task)
+            mock_task.artifacts = []
+            agent_msg = Message(
+                role=Role.agent,
+                parts=[Part(root=DataPart(data=expected_data))],
+                message_id="msg-1",
+            )
+            mock_task.history = [agent_msg]
+
+            result = agent._extract_response_data(mock_task)
+            assert result == expected_data
+
+    def test_extract_response_data_raises_no_data_part(self) -> None:
+        """_extract_response_data() should raise ValueError when no DataPart found."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            from a2a.types import Part, Task, TextPart
+
+            mock_task = MagicMock(spec=Task)
+            mock_task.artifacts = [
+                MagicMock(parts=[Part(root=TextPart(text="not data"))])
+            ]
+            mock_task.history = []
+
+            with pytest.raises(ValueError, match="No DataPart found"):
+                agent._extract_response_data(mock_task)
 
     @pytest.mark.asyncio
-    async def test_send_assessment_start_raises_not_implemented(
+    async def test_send_assessment_start_sends_correct_message(
         self,
         mock_purple_client: AsyncMock,
         mock_scenario: MagicMock,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """_send_assessment_start() should raise NotImplementedError (stubbed)."""
+        """_send_assessment_start() should send AssessmentStartMessage via purple_client."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
             initial_summary = InitialStateSummary(
-                email=EmailSummary(total_emails=0, total_threads=0, unread=0, draft_count=0),
-                calendar=CalendarSummary(event_count=0, calendar_count=0, events_today=0),
-                sms=SMSSummary(total_messages=0, total_conversations=0, unread=0),
+                email=EmailSummary(
+                    total_emails=0, total_threads=0, unread=0, draft_count=0
+                ),
+                calendar=CalendarSummary(
+                    event_count=0, calendar_count=0, events_today=0
+                ),
+                sms=SMSSummary(
+                    total_messages=0, total_conversations=0, unread=0
+                ),
                 chat=ChatSummary(total_messages=0, conversation_count=0),
             )
-            with pytest.raises(NotImplementedError):
-                await agent._send_assessment_start(
-                    purple_client=mock_purple_client,
-                    scenario=mock_scenario,
-                    initial_summary=initial_summary,
-                    ues_url="http://127.0.0.1:8100",
-                    api_key="test-key",
-                )
+
+            await agent._send_assessment_start(
+                purple_client=mock_purple_client,
+                scenario=mock_scenario,
+                initial_summary=initial_summary,
+                ues_url="http://127.0.0.1:8100",
+                api_key="test-key",
+            )
+
+            mock_purple_client.send_data.assert_awaited_once()
+            call_kwargs = mock_purple_client.send_data.call_args
+            sent_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+            assert sent_data["message_type"] == "assessment_start"
+            assert sent_data["ues_url"] == "http://127.0.0.1:8100"
+            assert sent_data["api_key"] == "test-key"
 
     @pytest.mark.asyncio
-    async def test_send_assessment_complete_raises_not_implemented(
+    async def test_send_assessment_complete_sends_correct_message(
+        self,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_send_assessment_complete() should send AssessmentCompleteMessage."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
+            await agent._send_assessment_complete(
+                purple_client=mock_purple_client,
+                reason="scenario_complete",
+            )
+
+            mock_purple_client.send_data.assert_awaited_once()
+            call_kwargs = mock_purple_client.send_data.call_args
+            sent_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+            assert sent_data["message_type"] == "assessment_complete"
+            assert sent_data["reason"] == "scenario_complete"
+
+    @pytest.mark.asyncio
+    async def test_send_assessment_complete_maps_cancelled_to_timeout(
         self,
         mock_purple_client: AsyncMock,
     ) -> None:
-        """_send_assessment_complete() should raise NotImplementedError (stubbed)."""
+        """_send_assessment_complete() should map 'cancelled' to 'timeout'."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._send_assessment_complete(
-                    purple_client=mock_purple_client,
-                    reason="scenario_complete",
-                )
+
+            await agent._send_assessment_complete(
+                purple_client=mock_purple_client,
+                reason="cancelled",
+            )
+
+            call_kwargs = mock_purple_client.send_data.call_args
+            sent_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+            assert sent_data["reason"] == "timeout"
 
 
 # =============================================================================
@@ -655,20 +964,86 @@ class TestAPIKeyManagement:
     """Tests for API key management methods."""
 
     @pytest.mark.asyncio
-    async def test_create_user_api_key_raises_not_implemented(self) -> None:
-        """_create_user_api_key() should raise NotImplementedError (stubbed)."""
+    async def test_create_user_api_key_returns_secret_and_id(self) -> None:
+        """_create_user_api_key() should POST to UES and return (secret, key_id)."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._create_user_api_key("assessment-123")
+            agent._ues_server = MagicMock()
+            agent._ues_server.base_url = "http://127.0.0.1:8100"
+            agent._ues_server.admin_api_key = "admin-key"
+
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "secret": "purple-secret-key",
+                "key_id": "key-abc",
+            }
+            mock_response.raise_for_status = MagicMock()
+
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = AsyncMock()
+                mock_client.post = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aenter__ = AsyncMock(
+                    return_value=mock_client
+                )
+                MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                secret, key_id = await agent._create_user_api_key("assess-123")
+
+                assert secret == "purple-secret-key"
+                assert key_id == "key-abc"
+                mock_client.post.assert_awaited_once()
+                call_args = mock_client.post.call_args
+                assert "/keys" in call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_revoke_user_api_key_raises_not_implemented(self) -> None:
-        """_revoke_user_api_key() should raise NotImplementedError (stubbed)."""
+    async def test_revoke_user_api_key_deletes_key(self) -> None:
+        """_revoke_user_api_key() should DELETE the key via UES."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._revoke_user_api_key("key-123")
+            agent._ues_server = MagicMock()
+            agent._ues_server.base_url = "http://127.0.0.1:8100"
+            agent._ues_server.admin_api_key = "admin-key"
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.raise_for_status = MagicMock()
+
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = AsyncMock()
+                mock_client.delete = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aenter__ = AsyncMock(
+                    return_value=mock_client
+                )
+                MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                await agent._revoke_user_api_key("key-abc")
+
+                mock_client.delete.assert_awaited_once()
+                call_args = mock_client.delete.call_args
+                assert "key-abc" in call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_revoke_user_api_key_ignores_404(self) -> None:
+        """_revoke_user_api_key() should silently ignore 404."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent._ues_server = MagicMock()
+            agent._ues_server.base_url = "http://127.0.0.1:8100"
+            agent._ues_server.admin_api_key = "admin-key"
+
+            mock_response = MagicMock()
+            mock_response.status_code = 404
+
+            with patch("httpx.AsyncClient") as MockClient:
+                mock_client = AsyncMock()
+                mock_client.delete = AsyncMock(return_value=mock_response)
+                MockClient.return_value.__aenter__ = AsyncMock(
+                    return_value=mock_client
+                )
+                MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                # Should not raise
+                await agent._revoke_user_api_key("nonexistent-key")
 
 
 # =============================================================================
@@ -680,15 +1055,31 @@ class TestUESSetup:
     """Tests for UES setup and state management methods."""
 
     @pytest.mark.asyncio
-    async def test_setup_ues_raises_not_implemented(
+    async def test_setup_ues_clears_and_loads_state(
         self,
         mock_scenario: MagicMock,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """_setup_ues() should raise NotImplementedError (stubbed)."""
+        """_setup_ues() should clear UES, import state, and start simulation."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._setup_ues(mock_scenario)
+            agent.ues_client = mock_ues_client
+            agent._ues_port = 8100
+            agent._proctor_api_key = "admin-key"
+
+            await agent._setup_ues(mock_scenario)
+
+            # Should clear state first
+            mock_ues_client.simulation.clear.assert_awaited_once()
+            # Should import scenario state via client library
+            mock_ues_client.scenario.import_full.assert_awaited_once_with(
+                scenario=mock_scenario.initial_state,
+                strict_modalities=False,
+            )
+            # Should start simulation
+            mock_ues_client.simulation.start.assert_awaited_once_with(
+                auto_advance=False
+            )
 
 
 # =============================================================================
@@ -700,27 +1091,128 @@ class TestStateManagement:
     """Tests for state management methods."""
 
     @pytest.mark.asyncio
-    async def test_capture_state_snapshot_raises_not_implemented(self) -> None:
-        """_capture_state_snapshot() should raise NotImplementedError (stubbed)."""
+    async def test_capture_state_snapshot_returns_all_modalities(
+        self,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_capture_state_snapshot() should return dict with all modality states."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._capture_state_snapshot()
+            agent.ues_client = mock_ues_client
+
+            # Mock model_dump on all state objects
+            for sub in [
+                mock_ues_client.email.get_state,
+                mock_ues_client.sms.get_state,
+                mock_ues_client.calendar.get_state,
+                mock_ues_client.chat.get_state,
+                mock_ues_client.time.get_state,
+            ]:
+                state = sub.return_value
+                state.model_dump = MagicMock(return_value={"mocked": True})
+
+            result = await agent._capture_state_snapshot()
+
+            assert "email" in result
+            assert "sms" in result
+            assert "calendar" in result
+            assert "chat" in result
+            assert "time" in result
+            for key in ["email", "sms", "calendar", "chat", "time"]:
+                assert result[key] == {"mocked": True}
 
     @pytest.mark.asyncio
-    async def test_build_initial_state_summary_raises_not_implemented(self) -> None:
-        """_build_initial_state_summary() should raise NotImplementedError (stubbed)."""
+    async def test_build_initial_state_summary_returns_summary(
+        self,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_build_initial_state_summary() should return an InitialStateSummary."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                await agent._build_initial_state_summary()
+            agent.ues_client = mock_ues_client
 
-    def test_count_events_today_raises_not_implemented(self) -> None:
-        """_count_events_today() should raise NotImplementedError (stubbed)."""
+            # Configure email state to have expected attributes
+            email_state = mock_ues_client.email.get_state.return_value
+            email_state.total_email_count = 10
+            email_state.threads = [MagicMock(), MagicMock()]
+            email_state.unread_count = 3
+            email_state.folders = {"drafts": [MagicMock()]}
+
+            # Configure sms state
+            sms_state = mock_ues_client.sms.get_state.return_value
+            sms_state.total_message_count = 5
+            sms_state.conversations = [MagicMock()]
+            sms_state.unread_count = 1
+
+            # Configure calendar state
+            cal_state = mock_ues_client.calendar.get_state.return_value
+            cal_state.events = {}  # dict for _count_events_today
+            cal_state.calendars = [MagicMock()]
+
+            # Configure chat state
+            chat_state = mock_ues_client.chat.get_state.return_value
+            chat_state.total_message_count = 8
+            chat_state.conversation_count = 2
+
+            result = await agent._build_initial_state_summary()
+
+            assert isinstance(result, InitialStateSummary)
+            assert result.email.total_emails == 10
+            assert result.email.total_threads == 2
+            assert result.email.unread == 3
+            assert result.email.draft_count == 1
+            assert result.sms.total_messages == 5
+            assert result.sms.total_conversations == 1
+            assert result.sms.unread == 1
+            assert result.calendar.event_count == 0  # empty dict
+            assert result.calendar.calendar_count == 1
+            assert result.chat.total_messages == 8
+            assert result.chat.conversation_count == 2
+
+    def test_count_events_today_with_matching_events(self, now: datetime) -> None:
+        """_count_events_today() should count events on the current date."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            with pytest.raises(NotImplementedError):
-                agent._count_events_today(MagicMock())
+
+            # Create mock calendar state with events dict
+            cal_state = MagicMock()
+            event_today = MagicMock()
+            event_today.start = now  # Same date
+            event_tomorrow = MagicMock()
+            event_tomorrow.start = now + timedelta(days=1)
+            cal_state.events = {
+                "evt-1": event_today,
+                "evt-2": event_tomorrow,
+            }
+
+            result = agent._count_events_today(cal_state, now)
+            assert result == 1
+
+    def test_count_events_today_with_no_events(self, now: datetime) -> None:
+        """_count_events_today() should return 0 for empty events."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            cal_state = MagicMock()
+            cal_state.events = {}
+
+            result = agent._count_events_today(cal_state, now)
+            assert result == 0
+
+    def test_count_events_today_with_string_time(self) -> None:
+        """_count_events_today() should handle string current_time."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            cal_state = MagicMock()
+            event = MagicMock()
+            event.start = datetime(2026, 2, 9, 14, 0, 0, tzinfo=timezone.utc)
+            cal_state.events = {"evt-1": event}
+
+            result = agent._count_events_today(
+                cal_state, "2026-02-09T10:00:00+00:00"
+            )
+            assert result == 1
 
 
 # =============================================================================
@@ -732,13 +1224,19 @@ class TestResponseScheduling:
     """Tests for response scheduling methods."""
 
     @pytest.mark.asyncio
-    async def test_schedule_response_raises_not_implemented(
+    async def test_schedule_response_dispatches_email(
         self,
         now: datetime,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """_schedule_response() should raise NotImplementedError (stubbed)."""
+        """_schedule_response() should dispatch email to _schedule_email_response."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+            agent._schedule_email_response = AsyncMock()
+            agent._schedule_sms_response = AsyncMock()
+            agent._schedule_calendar_response = AsyncMock()
+
             scheduled = ScheduledResponse(
                 modality="email",
                 character_name="Alice",
@@ -747,55 +1245,52 @@ class TestResponseScheduling:
                 content="Hello!",
                 recipients=["user@example.com"],
             )
-            with pytest.raises(NotImplementedError):
-                await agent._schedule_response(scheduled)
+            await agent._schedule_response(scheduled)
+
+            agent._schedule_email_response.assert_awaited_once_with(scheduled)
+            agent._schedule_sms_response.assert_not_awaited()
+            agent._schedule_calendar_response.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_schedule_email_response_raises_not_implemented(
+    async def test_schedule_response_dispatches_sms(
         self,
         now: datetime,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """_schedule_email_response() should raise NotImplementedError (stubbed)."""
+        """_schedule_response() should dispatch sms to _schedule_sms_response."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
-            scheduled = ScheduledResponse(
-                modality="email",
-                character_name="Alice",
-                character_email="alice@example.com",
-                scheduled_time=now,
-                content="Hello!",
-                recipients=["user@example.com"],
-            )
-            with pytest.raises(NotImplementedError):
-                await agent._schedule_email_response(scheduled)
+            agent.ues_client = mock_ues_client
+            agent._schedule_email_response = AsyncMock()
+            agent._schedule_sms_response = AsyncMock()
+            agent._schedule_calendar_response = AsyncMock()
 
-    @pytest.mark.asyncio
-    async def test_schedule_sms_response_raises_not_implemented(
-        self,
-        now: datetime,
-    ) -> None:
-        """_schedule_sms_response() should raise NotImplementedError (stubbed)."""
-        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
-            agent = GreenAgent.__new__(GreenAgent)
             scheduled = ScheduledResponse(
                 modality="sms",
                 character_name="Bob",
                 character_phone="+15551234567",
                 scheduled_time=now,
-                content="Hi there!",
+                content="Hi!",
                 recipients=["+15559876543"],
             )
-            with pytest.raises(NotImplementedError):
-                await agent._schedule_sms_response(scheduled)
+            await agent._schedule_response(scheduled)
+
+            agent._schedule_sms_response.assert_awaited_once_with(scheduled)
 
     @pytest.mark.asyncio
-    async def test_schedule_calendar_response_raises_not_implemented(
+    async def test_schedule_response_dispatches_calendar(
         self,
         now: datetime,
+        mock_ues_client: AsyncMock,
     ) -> None:
-        """_schedule_calendar_response() should raise NotImplementedError (stubbed)."""
+        """_schedule_response() should dispatch calendar to _schedule_calendar_response."""
         with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
             agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+            agent._schedule_email_response = AsyncMock()
+            agent._schedule_sms_response = AsyncMock()
+            agent._schedule_calendar_response = AsyncMock()
+
             scheduled = ScheduledResponse(
                 modality="calendar",
                 character_name="Carol",
@@ -804,8 +1299,111 @@ class TestResponseScheduling:
                 event_id="event-123",
                 rsvp_status="accepted",
             )
-            with pytest.raises(NotImplementedError):
-                await agent._schedule_calendar_response(scheduled)
+            await agent._schedule_response(scheduled)
+
+            agent._schedule_calendar_response.assert_awaited_once_with(scheduled)
+
+    @pytest.mark.asyncio
+    async def test_schedule_response_raises_on_unknown_modality(
+        self,
+        now: datetime,
+    ) -> None:
+        """_schedule_response() should raise ValueError for unknown modality."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            # Use MagicMock to bypass ScheduledResponse validation
+            scheduled = MagicMock()
+            scheduled.modality = "fax"
+
+            with pytest.raises(ValueError, match="Unknown modality"):
+                await agent._schedule_response(scheduled)
+
+    @pytest.mark.asyncio
+    async def test_schedule_email_response_calls_ues_client(
+        self,
+        now: datetime,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_schedule_email_response() should call ues_client.email.receive."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
+            scheduled = ScheduledResponse(
+                modality="email",
+                character_name="Alice",
+                character_email="alice@example.com",
+                scheduled_time=now,
+                content="Hello!",
+                recipients=["user@example.com"],
+                subject="Re: Test",
+                thread_id="thread-1",
+            )
+            await agent._schedule_email_response(scheduled)
+
+            mock_ues_client.email.receive.assert_awaited_once()
+            call_kwargs = mock_ues_client.email.receive.call_args.kwargs
+            assert call_kwargs["from_address"] == "alice@example.com"
+            assert call_kwargs["to_addresses"] == ["user@example.com"]
+            assert call_kwargs["subject"] == "Re: Test"
+            assert call_kwargs["body_text"] == "Hello!"
+
+    @pytest.mark.asyncio
+    async def test_schedule_sms_response_calls_ues_client(
+        self,
+        now: datetime,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_schedule_sms_response() should call ues_client.sms.receive."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
+            scheduled = ScheduledResponse(
+                modality="sms",
+                character_name="Bob",
+                character_phone="+15551234567",
+                scheduled_time=now,
+                content="Hi there!",
+                recipients=["+15559876543"],
+            )
+            await agent._schedule_sms_response(scheduled)
+
+            mock_ues_client.sms.receive.assert_awaited_once()
+            call_kwargs = mock_ues_client.sms.receive.call_args.kwargs
+            assert call_kwargs["from_number"] == "+15551234567"
+            assert call_kwargs["to_numbers"] == ["+15559876543"]
+            assert call_kwargs["body"] == "Hi there!"
+
+    @pytest.mark.asyncio
+    async def test_schedule_calendar_response_calls_ues_client(
+        self,
+        now: datetime,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_schedule_calendar_response() should call ues_client.calendar.respond_to_event."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
+            scheduled = ScheduledResponse(
+                modality="calendar",
+                character_name="Carol",
+                character_email="carol@example.com",
+                scheduled_time=now,
+                event_id="event-123",
+                rsvp_status="accepted",
+                rsvp_comment="Sounds good!",
+            )
+            await agent._schedule_calendar_response(scheduled)
+
+            mock_ues_client.calendar.respond_to_event.assert_awaited_once()
+            call_kwargs = mock_ues_client.calendar.respond_to_event.call_args.kwargs
+            assert call_kwargs["event_id"] == "event-123"
+            assert call_kwargs["attendee_email"] == "carol@example.com"
+            assert call_kwargs["response"] == "accepted"
+            assert call_kwargs["comment"] == "Sounds good!"
 
 
 # =============================================================================
@@ -1259,3 +1857,670 @@ class TestGreenAgentConfig:
         assert config.response_generator_model == "gpt-4o"
         assert config.summarization_model == "gpt-3.5-turbo"
         assert config.evaluation_model == "claude-3-opus"
+
+
+# =============================================================================
+# Additional Coverage Tests
+# =============================================================================
+
+
+class TestRunFullFlow:
+    """Tests for the full run() assessment flow with mocked internals."""
+
+    def _make_agent_with_mocks(
+        self,
+        mock_ues_client: AsyncMock,
+        config: GreenAgentConfig | None = None,
+    ) -> GreenAgent:
+        """Helper: create a GreenAgent with all internals mocked."""
+        agent = GreenAgent.__new__(GreenAgent)
+        agent.config = config or GreenAgentConfig()
+        agent.ues_port = 8100
+        agent.ues_client = mock_ues_client
+        agent._ues_server = MagicMock()
+        agent._ues_server.base_url = "http://127.0.0.1:8100"
+        agent._ues_server.admin_api_key = "admin-key"
+        agent._ues_port = 8100
+        agent._proctor_api_key = "admin-key"
+        agent._current_task_id = None
+        agent._cancelled = False
+        agent.response_llm = MagicMock()
+        agent.evaluation_llm = MagicMock()
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_run_completes_full_assessment(
+        self,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+        mock_scenario: MagicMock,
+    ) -> None:
+        """run() should complete a full assessment and return results."""
+        agent = self._make_agent_with_mocks(mock_ues_client)
+
+        # Mock setup methods
+        agent._setup_ues = AsyncMock()
+        agent._create_user_api_key = AsyncMock(
+            return_value=("secret-key", "key-id")
+        )
+        agent._revoke_user_api_key = AsyncMock()
+        agent._capture_state_snapshot = AsyncMock(return_value={"email": {}})
+        agent._build_initial_state_summary = AsyncMock(
+            return_value=InitialStateSummary(
+                email=EmailSummary(
+                    total_emails=0, total_threads=0, unread=0, draft_count=0
+                ),
+                calendar=CalendarSummary(
+                    event_count=0, calendar_count=0, events_today=0
+                ),
+                sms=SMSSummary(
+                    total_messages=0, total_conversations=0, unread=0
+                ),
+                chat=ChatSummary(total_messages=0, conversation_count=0),
+            )
+        )
+        agent._send_assessment_start = AsyncMock()
+        agent._send_assessment_complete = AsyncMock()
+
+        # Make _run_turn signal early completion on first turn
+        agent._run_turn = AsyncMock(
+            return_value=TurnResult(
+                turn_number=1,
+                actions_taken=0,
+                time_step="PT1H",
+                events_processed=0,
+                early_completion=True,
+                notes="All done",
+            )
+        )
+
+        # Mock scenario criteria
+        mock_scenario.criteria = []
+        mock_scenario.characters = []
+        mock_scenario.name = "Test Scenario"
+
+        # Mock CriteriaJudge and helpers
+        with (
+            patch("src.green.agent.ActionLogBuilder") as mock_alb_cls,
+            patch("src.green.agent.NewMessageCollector") as mock_nmc_cls,
+            patch("src.green.agent.ResponseGenerator") as mock_rg_cls,
+            patch("src.green.agent.CriteriaJudge") as mock_judge_cls,
+        ):
+            mock_judge = MagicMock()
+            mock_judge.get_dimensions.return_value = ["accuracy"]
+            mock_judge.evaluate_all = AsyncMock(return_value=[])
+            mock_judge.aggregate_scores.return_value = Scores(
+                overall=OverallScore(score=10, max_score=20),
+                dimensions={"accuracy": DimensionScore(score=10, max_score=20)},
+            )
+            mock_judge_cls.return_value = mock_judge
+
+            mock_alb = MagicMock()
+            mock_alb.get_log.return_value = []
+            mock_alb_cls.return_value = mock_alb
+
+            mock_nmc = MagicMock()
+            mock_nmc.initialize = AsyncMock()
+            mock_nmc_cls.return_value = mock_nmc
+
+            mock_rg_cls.return_value = MagicMock()
+
+            result = await agent.run(
+                task_id="task-1",
+                emitter=mock_emitter,
+                scenario=mock_scenario,
+                evaluators={},
+                purple_client=mock_purple_client,
+                assessment_config={},
+            )
+
+            assert isinstance(result, AssessmentResults)
+            assert result.status == "completed"
+            assert result.scores.overall.score == 10
+            agent._setup_ues.assert_awaited_once()
+            agent._create_user_api_key.assert_awaited_once()
+            agent._revoke_user_api_key.assert_awaited_once_with("key-id")
+            agent._send_assessment_start.assert_awaited_once()
+            agent._send_assessment_complete.assert_awaited_once()
+            mock_emitter.assessment_started.assert_awaited_once()
+            mock_emitter.assessment_completed.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_max_turns_reached(
+        self,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+        mock_scenario: MagicMock,
+    ) -> None:
+        """run() should stop at max_turns and set reason to max_turns_reached."""
+        agent = self._make_agent_with_mocks(mock_ues_client)
+        agent._setup_ues = AsyncMock()
+        agent._create_user_api_key = AsyncMock(
+            return_value=("secret-key", "key-id")
+        )
+        agent._revoke_user_api_key = AsyncMock()
+        agent._capture_state_snapshot = AsyncMock(return_value={})
+        agent._build_initial_state_summary = AsyncMock(
+            return_value=InitialStateSummary(
+                email=EmailSummary(
+                    total_emails=0, total_threads=0, unread=0, draft_count=0
+                ),
+                calendar=CalendarSummary(
+                    event_count=0, calendar_count=0, events_today=0
+                ),
+                sms=SMSSummary(
+                    total_messages=0, total_conversations=0, unread=0
+                ),
+                chat=ChatSummary(total_messages=0, conversation_count=0),
+            )
+        )
+        agent._send_assessment_start = AsyncMock()
+        agent._send_assessment_complete = AsyncMock()
+
+        # Never signal early completion
+        agent._run_turn = AsyncMock(
+            return_value=TurnResult(
+                turn_number=1,
+                actions_taken=1,
+                time_step="PT1H",
+                events_processed=2,
+                early_completion=False,
+            )
+        )
+        mock_scenario.criteria = []
+        mock_scenario.characters = []
+        mock_scenario.name = "Test"
+
+        with (
+            patch("src.green.agent.ActionLogBuilder") as mock_alb_cls,
+            patch("src.green.agent.NewMessageCollector") as mock_nmc_cls,
+            patch("src.green.agent.ResponseGenerator"),
+            patch("src.green.agent.CriteriaJudge") as mock_judge_cls,
+        ):
+            mock_judge = MagicMock()
+            mock_judge.get_dimensions.return_value = []
+            mock_judge.evaluate_all = AsyncMock(return_value=[])
+            mock_judge.aggregate_scores.return_value = Scores(
+                overall=OverallScore(score=0, max_score=0),
+                dimensions={},
+            )
+            mock_judge_cls.return_value = mock_judge
+            mock_alb = MagicMock()
+            mock_alb.get_log.return_value = []
+            mock_alb_cls.return_value = mock_alb
+            mock_nmc = MagicMock()
+            mock_nmc.initialize = AsyncMock()
+            mock_nmc_cls.return_value = mock_nmc
+
+            result = await agent.run(
+                task_id="task-1",
+                emitter=mock_emitter,
+                scenario=mock_scenario,
+                evaluators={},
+                purple_client=mock_purple_client,
+                assessment_config={"max_turns": 3},
+            )
+
+            assert agent._run_turn.await_count == 3
+            assert result.turns_taken == 3
+
+    @pytest.mark.asyncio
+    async def test_run_clears_task_id_in_finally(
+        self,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+        mock_scenario: MagicMock,
+    ) -> None:
+        """run() should always reset _current_task_id in finally block."""
+        agent = self._make_agent_with_mocks(mock_ues_client)
+        agent._setup_ues = AsyncMock(side_effect=Exception("setup boom"))
+
+        mock_scenario.criteria = []
+        mock_scenario.characters = []
+        mock_scenario.name = "Test"
+
+        with (
+            patch("src.green.agent.ActionLogBuilder"),
+            patch("src.green.agent.NewMessageCollector"),
+            patch("src.green.agent.ResponseGenerator"),
+            patch("src.green.agent.CriteriaJudge"),
+        ):
+            with pytest.raises(Exception, match="setup boom"):
+                await agent.run(
+                    task_id="task-99",
+                    emitter=mock_emitter,
+                    scenario=mock_scenario,
+                    evaluators={},
+                    purple_client=mock_purple_client,
+                    assessment_config={},
+                )
+
+        # _current_task_id should be cleared by finally
+        assert agent._current_task_id is None
+
+    @pytest.mark.asyncio
+    async def test_run_revokes_api_key_on_error(
+        self,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+        mock_scenario: MagicMock,
+    ) -> None:
+        """run() should revoke API key even when an error occurs."""
+        agent = self._make_agent_with_mocks(mock_ues_client)
+        agent._setup_ues = AsyncMock()
+        agent._create_user_api_key = AsyncMock(
+            return_value=("secret", "key-to-revoke")
+        )
+        agent._revoke_user_api_key = AsyncMock()
+        agent._capture_state_snapshot = AsyncMock(side_effect=Exception("snap boom"))
+
+        mock_scenario.criteria = []
+        mock_scenario.characters = []
+        mock_scenario.name = "Test"
+
+        with (
+            patch("src.green.agent.ActionLogBuilder"),
+            patch("src.green.agent.NewMessageCollector") as mock_nmc_cls,
+            patch("src.green.agent.ResponseGenerator"),
+            patch("src.green.agent.CriteriaJudge"),
+        ):
+            mock_nmc = MagicMock()
+            mock_nmc.initialize = AsyncMock()
+            mock_nmc_cls.return_value = mock_nmc
+
+            with pytest.raises(Exception, match="snap boom"):
+                await agent.run(
+                    task_id="task-1",
+                    emitter=mock_emitter,
+                    scenario=mock_scenario,
+                    evaluators={},
+                    purple_client=mock_purple_client,
+                    assessment_config={},
+                )
+
+        agent._revoke_user_api_key.assert_awaited_with("key-to-revoke")
+
+
+class TestShutdownErrorHandling:
+    """Tests for shutdown edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_handles_client_close_error(
+        self,
+        config: GreenAgentConfig,
+        mock_ues_server_manager: MagicMock,
+    ) -> None:
+        """shutdown() should handle client close() errors gracefully."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch(
+                "src.green.agent.UESServerManager",
+                return_value=mock_ues_server_manager,
+            ),
+        ):
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            mock_client = AsyncMock()
+            mock_client.close = AsyncMock(side_effect=Exception("close error"))
+            agent.ues_client = mock_client
+
+            # Should not raise
+            await agent.shutdown()
+
+            assert agent.ues_client is None
+            mock_ues_server_manager.stop.assert_awaited_once()
+
+
+class TestCancelEdgeCases:
+    """Tests for cancel edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_no_current_task(
+        self,
+        config: GreenAgentConfig,
+    ) -> None:
+        """cancel() should be a no-op when no task is running."""
+        with (
+            patch("src.green.agent.LLMFactory") as mock_factory,
+            patch("src.green.agent.UESServerManager"),
+        ):
+            mock_factory.create.return_value = MagicMock()
+
+            agent = GreenAgent(ues_port=8100, config=config)
+            assert agent._current_task_id is None
+            assert agent._cancelled is False
+
+            await agent.cancel("some-task")
+
+            assert agent._cancelled is False
+
+
+class TestProcessTurnEndWithResponses:
+    """Tests for _process_turn_end when responses are generated."""
+
+    @pytest.mark.asyncio
+    async def test_process_turn_end_schedules_generated_responses(
+        self,
+        now: datetime,
+        mock_emitter: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_process_turn_end() should schedule each generated response."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+
+            agent._advance_time = AsyncMock(
+                return_value=MagicMock(events_executed=0)
+            )
+            agent._advance_remainder = AsyncMock(
+                return_value=MagicMock(events_executed=0)
+            )
+            agent._schedule_response = AsyncMock()
+
+            mock_action_log = MagicMock()
+            mock_action_log.add_events_from_turn.return_value = ([], [])
+
+            mock_message_collector = MagicMock()
+            mock_message_collector.collect = AsyncMock(return_value=[])
+
+            response1 = ScheduledResponse(
+                modality="email",
+                character_name="Alice",
+                character_email="alice@example.com",
+                scheduled_time=now,
+                content="Reply 1",
+                recipients=["user@example.com"],
+            )
+            response2 = ScheduledResponse(
+                modality="sms",
+                character_name="Bob",
+                character_phone="+15551234567",
+                scheduled_time=now,
+                content="Reply 2",
+                recipients=["+15559876543"],
+            )
+            mock_response_gen = MagicMock()
+            mock_response_gen.process_new_messages = AsyncMock(
+                return_value=[response1, response2]
+            )
+
+            result = await agent._process_turn_end(
+                turn=1,
+                turn_start_time=now,
+                time_step="PT1H",
+                emitter=mock_emitter,
+                action_log_builder=mock_action_log,
+                message_collector=mock_message_collector,
+                response_generator=mock_response_gen,
+            )
+
+            assert result.responses_generated == 2
+            assert agent._schedule_response.await_count == 2
+            mock_emitter.responses_generated.assert_awaited_once()
+            call_kwargs = mock_emitter.responses_generated.call_args.kwargs
+            assert call_kwargs["responses_count"] == 2
+            assert set(call_kwargs["characters_involved"]) == {"Alice", "Bob"}
+
+
+class TestExtractResponseDataEdgeCases:
+    """Tests for _extract_response_data with various response types."""
+
+    def test_extract_from_message_response(self) -> None:
+        """_extract_response_data() should extract data from Message response."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            from a2a.types import DataPart, Message, Part, Role
+
+            expected = {"message_type": "turn_complete"}
+            msg = Message(
+                role=Role.agent,
+                parts=[Part(root=DataPart(data=expected))],
+                message_id="msg-1",
+            )
+
+            result = agent._extract_response_data(msg)
+            assert result == expected
+
+    def test_extract_from_duck_typed_response(self) -> None:
+        """_extract_response_data() should handle duck-typed objects with parts."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            expected = {"message_type": "turn_complete"}
+            mock_part = MagicMock()
+            mock_part.root = MagicMock()
+            mock_part.root.data = expected
+
+            mock_response = MagicMock()
+            # Not a Task or Message instance, but has parts
+            mock_response.__class__ = type("CustomResponse", (), {})
+            mock_response.artifacts = []  # empty list, not None
+            mock_response.parts = [mock_part]
+
+            result = agent._extract_response_data(mock_response)
+            assert result == expected
+
+
+class TestSendAssessmentCompleteReasonMapping:
+    """Tests for _send_assessment_complete reason mapping edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_maps_max_turns_reached_to_timeout(
+        self,
+        mock_purple_client: AsyncMock,
+    ) -> None:
+        """_send_assessment_complete() should map 'max_turns_reached' to 'timeout'."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            await agent._send_assessment_complete(
+                purple_client=mock_purple_client,
+                reason="max_turns_reached",
+            )
+
+            call_kwargs = mock_purple_client.send_data.call_args
+            sent_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+            assert sent_data["reason"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_maps_error_to_error(
+        self,
+        mock_purple_client: AsyncMock,
+    ) -> None:
+        """_send_assessment_complete() should map 'error' to 'error'."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            await agent._send_assessment_complete(
+                purple_client=mock_purple_client,
+                reason="error",
+            )
+
+            call_kwargs = mock_purple_client.send_data.call_args
+            sent_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+            assert sent_data["reason"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_maps_unknown_reason_to_timeout(
+        self,
+        mock_purple_client: AsyncMock,
+    ) -> None:
+        """_send_assessment_complete() should map unknown reasons to 'timeout'."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            await agent._send_assessment_complete(
+                purple_client=mock_purple_client,
+                reason="something_unexpected",
+            )
+
+            call_kwargs = mock_purple_client.send_data.call_args
+            sent_data = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+            assert sent_data["reason"] == "timeout"
+
+
+class TestBuildResultsStatusMapping:
+    """Tests for _build_results status mapping edge cases."""
+
+    def test_maps_timeout_status(self, mock_scenario: MagicMock) -> None:
+        """_build_results() should map 'timeout' status correctly."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            scores = Scores(
+                overall=OverallScore(score=0, max_score=10),
+                dimensions={"d": DimensionScore(score=0, max_score=10)},
+            )
+            result = agent._build_results(
+                assessment_id="a1",
+                scenario=mock_scenario,
+                scores=scores,
+                criteria_results=[],
+                action_log=[],
+                turns_completed=0,
+                duration=0,
+                status="timeout",
+                participant="http://p.example.com",
+            )
+            assert result.status == "timeout"
+
+    def test_maps_unknown_status_to_failed(
+        self, mock_scenario: MagicMock
+    ) -> None:
+        """_build_results() should map unknown status to 'failed'."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            scores = Scores(
+                overall=OverallScore(score=0, max_score=10),
+                dimensions={"d": DimensionScore(score=0, max_score=10)},
+            )
+            result = agent._build_results(
+                assessment_id="a1",
+                scenario=mock_scenario,
+                scores=scores,
+                criteria_results=[],
+                action_log=[],
+                turns_completed=0,
+                duration=0,
+                status="something_weird",
+                participant="http://p.example.com",
+            )
+            assert result.status == "failed"
+
+
+class TestCountEventsTodayEdgeCases:
+    """Tests for _count_events_today edge cases."""
+
+    def test_count_multiple_events_same_day(self, now: datetime) -> None:
+        """_count_events_today() should count all events on the same date."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            cal_state = MagicMock()
+            evt1 = MagicMock()
+            evt1.start = now.replace(hour=8)
+            evt2 = MagicMock()
+            evt2.start = now.replace(hour=14)
+            evt3 = MagicMock()
+            evt3.start = now.replace(hour=23)
+            cal_state.events = {"a": evt1, "b": evt2, "c": evt3}
+
+            result = agent._count_events_today(cal_state, now)
+            assert result == 3
+
+    def test_count_events_with_string_event_start(self, now: datetime) -> None:
+        """_count_events_today() should handle events with string start times."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+
+            cal_state = MagicMock()
+            evt = MagicMock()
+            evt.start = "2026-02-09T15:00:00+00:00"
+            cal_state.events = {"a": evt}
+
+            result = agent._count_events_today(cal_state, now)
+            assert result == 1
+
+
+class TestRunTurnTimeStepDefault:
+    """Tests for _run_turn time_step handling."""
+
+    @pytest.mark.asyncio
+    async def test_run_turn_uses_default_time_step(
+        self,
+        now: datetime,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_run_turn() should use default PT1H time_step from TurnCompleteMessage."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+            agent.config = GreenAgentConfig(default_turn_timeout=60.0)
+
+            # TurnComplete with default time_step (PT1H)
+            turn_complete = TurnCompleteMessage()
+            agent._send_and_wait_purple = AsyncMock(return_value=turn_complete)
+            agent._process_turn_end = AsyncMock(
+                return_value=EndOfTurnResult(
+                    actions_taken=0, total_events=0, responses_generated=0
+                )
+            )
+
+            result = await agent._run_turn(
+                turn=1,
+                emitter=mock_emitter,
+                purple_client=mock_purple_client,
+                action_log_builder=MagicMock(),
+                message_collector=MagicMock(),
+                response_generator=MagicMock(),
+            )
+
+            assert result.time_step == "PT1H"
+            agent._process_turn_end.assert_awaited_once()
+            call_kwargs = agent._process_turn_end.call_args.kwargs
+            assert call_kwargs["time_step"] == "PT1H"
+
+    @pytest.mark.asyncio
+    async def test_run_turn_uses_custom_time_step(
+        self,
+        now: datetime,
+        mock_emitter: AsyncMock,
+        mock_purple_client: AsyncMock,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """_run_turn() should use custom time_step from TurnCompleteMessage."""
+        with patch.object(GreenAgent, "__init__", lambda self, **kwargs: None):
+            agent = GreenAgent.__new__(GreenAgent)
+            agent.ues_client = mock_ues_client
+            agent.config = GreenAgentConfig(default_turn_timeout=60.0)
+
+            turn_complete = TurnCompleteMessage(time_step="PT30M")
+            agent._send_and_wait_purple = AsyncMock(return_value=turn_complete)
+            agent._process_turn_end = AsyncMock(
+                return_value=EndOfTurnResult(
+                    actions_taken=0, total_events=0, responses_generated=0
+                )
+            )
+
+            result = await agent._run_turn(
+                turn=1,
+                emitter=mock_emitter,
+                purple_client=mock_purple_client,
+                action_log_builder=MagicMock(),
+                message_collector=MagicMock(),
+                response_generator=MagicMock(),
+            )
+
+            assert result.time_step == "PT30M"
+            call_kwargs = agent._process_turn_end.call_args.kwargs
+            assert call_kwargs["time_step"] == "PT30M"
