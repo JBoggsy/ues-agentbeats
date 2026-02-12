@@ -56,6 +56,10 @@ def make_ues_event(
     executed_at: datetime,
     status: str = "executed",
     data: dict[str, Any] | None = None,
+    scheduled_time: datetime | None = None,
+    priority: int = 0,
+    created_at: datetime | None = None,
+    error_message: str | None = None,
 ) -> dict[str, Any]:
     """Create a UES EventResponse dict for testing.
     
@@ -67,15 +71,23 @@ def make_ues_event(
         executed_at: When the event was executed.
         status: Event status (executed, failed, etc.).
         data: Additional event data (parameters).
+        scheduled_time: When the event was scheduled. Defaults to executed_at.
+        priority: Execution priority. Defaults to 0.
+        created_at: When the event was created. Defaults to executed_at.
+        error_message: Error details if execution failed.
         
     Returns:
         A dict matching UES EventResponse structure.
     """
     return {
         "event_id": event_id,
+        "scheduled_time": (scheduled_time or executed_at).isoformat(),
         "modality": modality,
         "status": status,
+        "priority": priority,
+        "created_at": (created_at or executed_at).isoformat(),
         "executed_at": executed_at.isoformat(),
+        "error_message": error_message,
         "agent_id": agent_id,
         "data": {
             "operation": action,
@@ -1005,7 +1017,7 @@ class TestOperationKeyHandling:
             make_ues_event(
                 event_id="evt-1",
                 modality="chat",
-                action="send_message",
+                action="send",
                 agent_id=PURPLE_AGENT_ID,
                 executed_at=now,
                 data={"content": "Hello"},
@@ -1014,7 +1026,7 @@ class TestOperationKeyHandling:
         builder.start_turn(1)
         purple_entries, _ = builder.add_events_from_turn(events=events)
         builder.end_turn()
-        assert purple_entries[0].action == "chat.send_message"
+        assert purple_entries[0].action == "chat.send"
 
     def test_sms_operation_produces_correct_action(
         self, builder: ActionLogBuilder, now: datetime

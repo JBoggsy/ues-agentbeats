@@ -1005,7 +1005,7 @@ class TestOperationKeyHandling:
             make_ues_event(
                 event_id="evt-1",
                 modality="chat",
-                action="send_message",
+                action="send",
                 agent_id=PURPLE_AGENT_ID,
                 executed_at=now,
                 data={"content": "Hello"},
@@ -1014,7 +1014,7 @@ class TestOperationKeyHandling:
         builder.start_turn(1)
         purple_entries, _ = builder.add_events_from_turn(events=events)
         builder.end_turn()
-        assert purple_entries[0].action == "chat.send_message"
+        assert purple_entries[0].action == "chat.send"
 
     def test_sms_operation_produces_correct_action(
         self, builder: ActionLogBuilder, now: datetime
