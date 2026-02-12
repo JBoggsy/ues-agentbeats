@@ -624,7 +624,7 @@ The Green Agent orchestrates assessments, manages UES, and evaluates Purple agen
 - 3.5 New Message Collector — ✅ COMPLETE (41 tests)
 - 3.6 Response Generation — ✅ COMPLETE (54 unit + 11 integration tests)
 - 3.7 Criteria Judge — ✅ COMPLETE
-- 3.8 Green Agent (`agent.py`) — ✅ COMPLETE (22/22 methods, 5,940 lines of tests, 191 tests)
+- 3.8 Green Agent (`agent.py`) — ✅ COMPLETE (22/22 methods, 6,073 lines of tests, 191 tests)
 - 3.9 Green Agent Executor — not started
 - 3.10 Module Structure — updated
 
@@ -1611,13 +1611,13 @@ owns its own UES server and can run multiple sequential assessments (one per tas
 - `_build_results()` — assemble AssessmentResults with status mapping and participant field
 - `_check_ues_health()` — delegates to `UESServerManager.check_health()`
 
-**Tests** (5,940 lines across 6 files, 191 tests):
+**Tests** (6,073 lines across 6 files, 191 tests):
 - `test_agent.py` (2,526 lines) — unit tests for all 22 methods (97 tests)
 - `test_agent_api_keys.py` (456 lines) — API key CRUD
 - `test_agent_purple_comm.py` (508 lines) — A2A communication
 - `test_agent_ues_setup.py` (295 lines) — UES scenario setup (uses client library)
 - `test_response_scheduling.py` (370 lines) — response scheduling
-- `test_agent_integration.py` (1,785 lines) — integration tests + 3 end-to-end tests with real UES
+- `test_agent_integration.py` (1,918 lines) — integration tests + 3 end-to-end tests with real UES
 
 **Responsibilities:**
 1. Own and manage UES server lifecycle (startup/shutdown)
@@ -2279,11 +2279,11 @@ src/green/
     └── README.md
 
 tests/green/
-├── test_agent.py                   # GreenAgent unit tests (1,261 lines) ✅ NEW
+├── test_agent.py                   # GreenAgent unit tests (2,526 lines) ✅ NEW
 ├── test_agent_api_keys.py          # API key management tests (456 lines) ✅ NEW
-├── test_agent_integration.py       # Integration tests (1,002 lines) ✅ NEW
-├── test_agent_purple_comm.py       # Purple communication tests (507 lines) ✅ NEW
-├── test_agent_ues_setup.py         # UES setup tests (321 lines) ✅ NEW
+├── test_agent_integration.py       # Integration tests (1,918 lines) ✅ NEW
+├── test_agent_purple_comm.py       # Purple communication tests (508 lines) ✅ NEW
+├── test_agent_ues_setup.py         # UES setup tests (295 lines) ✅ NEW
 ├── test_response_scheduling.py     # Response scheduling tests (370 lines) ✅ NEW
 └── ... (existing test files)
 ```
@@ -2785,7 +2785,7 @@ ues-agentbeats/
 - [x] Implement state management (`_capture_state_snapshot`, `_build_initial_state_summary`, `_count_events_today`) — implemented via code swarm
 - [x] Implement response scheduling (`_schedule_response` and variants) — implemented via code swarm
 - [x] Write unit tests for GreenAgent (5 test files, ~4,155 lines, 191 tests) — implemented via code swarm, expanded and debugged
-- [x] Write integration tests for GreenAgent (~1,785 lines, 42 tests including 3 e2e with real UES) — implemented via code swarm, expanded and debugged
+- [x] Write integration tests for GreenAgent (1,918 lines, 45 tests including 3 e2e with real UES) — implemented via code swarm, expanded and debugged
 - [x] Implement `__init__()`, `startup()`, `shutdown()` — implemented via code swarm
 - [x] Implement `_advance_time()`, `_advance_remainder()` — implemented via code swarm
 - [x] Implement `_build_results()` — implemented via code swarm
