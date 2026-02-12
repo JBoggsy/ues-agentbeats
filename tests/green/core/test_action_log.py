@@ -78,7 +78,7 @@ def make_ues_event(
         "executed_at": executed_at.isoformat(),
         "agent_id": agent_id,
         "data": {
-            "action": action,
+            "operation": action,
             **(data or {}),
         },
     }
@@ -858,7 +858,7 @@ class TestEdgeCases:
                 "status": "executed",
                 "executed_at": now.isoformat(),
                 "agent_id": PURPLE_AGENT_ID,
-                "data": {"action": "read"},
+                "data": {"operation": "read"},
             },
         ]
         builder.start_turn(1)
@@ -916,7 +916,7 @@ class TestEdgeCases:
                 "status": "executed",
                 "executed_at": "2025-01-15T10:00:00Z",
                 "agent_id": PURPLE_AGENT_ID,
-                "data": {"action": "send"},
+                "data": {"operation": "send"},
             },
         ]
         builder.start_turn(1)
@@ -935,7 +935,7 @@ class TestEdgeCases:
                 "status": "executed",
                 "executed_at": "2025-01-15T05:00:00-05:00",
                 "agent_id": PURPLE_AGENT_ID,
-                "data": {"action": "send"},
+                "data": {"operation": "send"},
             },
         ]
         builder.start_turn(1)
@@ -944,3 +944,153 @@ class TestEdgeCases:
         # 05:00 -05:00 = 10:00 UTC
         expected = datetime(2025, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
         assert purple_entries[0].timestamp == expected
+
+
+# =============================================================================
+# Operation Key Handling Tests
+# =============================================================================
+
+
+class TestOperationKeyHandling:
+    """Tests for correct handling of the 'operation' key in event data.
+
+    UES modalities use 'operation' as the key in event data to identify
+    the operation type. These tests verify that the ActionLogBuilder
+    correctly reads this key and excludes it from parameters.
+    """
+
+    def test_email_operation_produces_correct_action(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """Email event with 'operation' key should produce 'email.<op>'."""
+        events = [
+            make_ues_event(
+                event_id="evt-1",
+                modality="email",
+                action="send",
+                agent_id=PURPLE_AGENT_ID,
+                executed_at=now,
+                data={"to_addresses": ["alice@example.com"]},
+            ),
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert purple_entries[0].action == "email.send"
+
+    def test_calendar_operation_produces_correct_action(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """Calendar event with 'operation' key should produce 'calendar.<op>'."""
+        events = [
+            make_ues_event(
+                event_id="evt-1",
+                modality="calendar",
+                action="create",
+                agent_id=PURPLE_AGENT_ID,
+                executed_at=now,
+                data={"title": "Team Meeting"},
+            ),
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert purple_entries[0].action == "calendar.create"
+
+    def test_chat_operation_produces_correct_action(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """Chat event with 'operation' key should produce 'chat.<op>'."""
+        events = [
+            make_ues_event(
+                event_id="evt-1",
+                modality="chat",
+                action="send_message",
+                agent_id=PURPLE_AGENT_ID,
+                executed_at=now,
+                data={"content": "Hello"},
+            ),
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert purple_entries[0].action == "chat.send_message"
+
+    def test_sms_operation_produces_correct_action(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """SMS event with 'operation' key should produce 'sms.<op>'."""
+        events = [
+            make_ues_event(
+                event_id="evt-1",
+                modality="sms",
+                action="send_message",
+                agent_id=PURPLE_AGENT_ID,
+                executed_at=now,
+                data={"message_data": {"content": "Hi"}},
+            ),
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert purple_entries[0].action == "sms.send_message"
+
+    def test_missing_operation_key_falls_back_to_unknown(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """Event data with no 'operation' key should produce 'modality.unknown'."""
+        events = [
+            {
+                "event_id": "evt-1",
+                "modality": "email",
+                "status": "executed",
+                "executed_at": now.isoformat(),
+                "agent_id": PURPLE_AGENT_ID,
+                "data": {"to_addresses": ["alice@example.com"]},
+            },
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert purple_entries[0].action == "email.unknown"
+
+    def test_operation_excluded_from_parameters(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """The 'operation' key should not appear in entry parameters."""
+        events = [
+            make_ues_event(
+                event_id="evt-1",
+                modality="email",
+                action="send",
+                agent_id=PURPLE_AGENT_ID,
+                executed_at=now,
+                data={"to_addresses": ["alice@example.com"], "subject": "Hi"},
+            ),
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert "operation" not in purple_entries[0].parameters
+        assert purple_entries[0].parameters == {
+            "to_addresses": ["alice@example.com"],
+            "subject": "Hi",
+        }
+
+    def test_operation_only_data_produces_empty_parameters(
+        self, builder: ActionLogBuilder, now: datetime
+    ) -> None:
+        """Event data with only 'operation' key should produce empty parameters."""
+        events = [
+            make_ues_event(
+                event_id="evt-1",
+                modality="email",
+                action="send",
+                agent_id=PURPLE_AGENT_ID,
+                executed_at=now,
+            ),
+        ]
+        builder.start_turn(1)
+        purple_entries, _ = builder.add_events_from_turn(events=events)
+        builder.end_turn()
+        assert purple_entries[0].parameters == {}

@@ -276,10 +276,10 @@ class ActionLogBuilder:
             >>> builder.start_turn(1)
             >>> events = [
             ...     {"event_id": "e1", "modality": "email", "status": "executed",
-            ...      "executed_at": "2026-01-28T10:00:00Z", "data": {"action": "send"},
+            ...      "executed_at": "2026-01-28T10:00:00Z", "data": {"operation": "send"},
             ...      "agent_id": "purple-123"},
             ...     {"event_id": "e2", "modality": "email", "status": "executed",
-            ...      "executed_at": "2026-01-28T10:05:00Z", "data": {"action": "receive"},
+            ...      "executed_at": "2026-01-28T10:05:00Z", "data": {"operation": "receive"},
             ...      "agent_id": "green-456"},
             ... ]
             >>> purple, green = builder.add_events_from_turn(events)
@@ -326,7 +326,7 @@ class ActionLogBuilder:
         # Extract action from modality and data
         modality = event.get("modality", "unknown")
         data = event.get("data", {})
-        action_type = data.get("action", "unknown")
+        action_type = data.get("operation", "unknown")
         action = f"{modality}.{action_type}"
 
         # Determine success from status
@@ -346,8 +346,8 @@ class ActionLogBuilder:
 
             timestamp = datetime.now(tz=timezone.utc)
 
-        # Extract parameters from data (excluding 'action' key)
-        parameters = {k: v for k, v in data.items() if k != "action"}
+        # Extract parameters from data (excluding 'operation' key)
+        parameters = {k: v for k, v in data.items() if k != "operation"}
 
         return ActionLogEntry(
             turn=self._current_turn,

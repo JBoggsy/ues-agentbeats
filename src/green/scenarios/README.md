@@ -188,6 +188,57 @@ The `initial_state` field can be:
 2. **Default file**: Omit the field, and `initial_state.json` will be loaded
 3. **Custom path**: A string path relative to the scenario directory
 
+#### Initial State Format (UES Export Format)
+
+The initial state must use the UES `/scenario/import/full` endpoint format with the following structure:
+
+```json
+{
+  "metadata": {
+    "ues_version": "0.2.1",
+    "scenario_version": "1",
+    "created_at": "2026-01-28T09:00:00+00:00",
+    "description": "Optional scenario description"
+  },
+  "environment": {
+    "time_state": {
+      "current_time": "2026-01-28T09:00:00+00:00",
+      "time_scale": 1.0,
+      "is_paused": false,
+      "auto_advance": false,
+      "last_wall_time_update": "2026-01-28T09:00:00+00:00"
+    },
+    "modality_states": {
+      "email": {
+        "modality_type": "email",
+        "last_updated": "2026-01-28T09:00:00+00:00",
+        "update_count": 0,
+        "user_email_address": "user@example.com",
+        "emails": {},
+        "threads": {},
+        "folders": {},
+        "labels": {},
+        "drafts": {}
+      },
+      "calendar": { ... },
+      "sms": { ... },
+      "chat": { ... }
+    }
+  },
+  "events": {
+    "events": []
+  }
+}
+```
+
+**Required sections:**
+- `metadata` - Version and creation metadata
+- `environment.time_state` - Simulation time configuration
+- `environment.modality_states` - State for each modality (email, calendar, sms, chat)
+- `events` - Event log (typically empty at start)
+
+Each modality in `modality_states` must include a `modality_type` field matching its key name.
+
 ## Time Formats
 
 All durations use ISO 8601 format:

@@ -116,6 +116,7 @@ class TestExtractResponseData:
             status=TaskStatus(state=TaskState.completed),
             artifacts=[
                 Artifact(
+                    artifactId="art-1",
                     parts=[Part(root=DataPart(data=data))],
                 )
             ],
@@ -222,7 +223,7 @@ class TestSendAndWaitPurple:
             id="task-1",
             context_id="ctx-1",
             status=TaskStatus(state=TaskState.completed),
-            artifacts=[Artifact(parts=[Part(root=DataPart(data=response_data))])],
+            artifacts=[Artifact(artifactId="art-1", parts=[Part(root=DataPart(data=response_data))])],
         )
         mock_purple_client.send_message = AsyncMock(return_value=mock_task)
 
@@ -258,7 +259,7 @@ class TestSendAndWaitPurple:
             id="task-1",
             context_id="ctx-1",
             status=TaskStatus(state=TaskState.completed),
-            artifacts=[Artifact(parts=[Part(root=DataPart(data=response_data))])],
+            artifacts=[Artifact(artifactId="art-2", parts=[Part(root=DataPart(data=response_data))])],
         )
         mock_purple_client.send_message = AsyncMock(return_value=mock_task)
 
@@ -323,7 +324,7 @@ class TestSendAndWaitPurple:
             id="task-1",
             context_id="ctx-1",
             status=TaskStatus(state=TaskState.completed),
-            artifacts=[Artifact(parts=[Part(root=DataPart(data=response_data))])],
+            artifacts=[Artifact(artifactId="art-3", parts=[Part(root=DataPart(data=response_data))])],
         )
         mock_purple_client.send_message = AsyncMock(return_value=mock_task)
 
