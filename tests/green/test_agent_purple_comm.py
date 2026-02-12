@@ -37,6 +37,7 @@ from src.common.agentbeats.messages import (
     SMSSummary,
     TurnCompleteMessage,
     TurnStartMessage,
+    DEFAULT_ASSESSMENT_INSTRUCTIONS,
 )
 from src.green.agent import GreenAgent
 
@@ -355,7 +356,6 @@ class TestSendAssessmentStart:
         self,
         green_agent: GreenAgent,
         mock_purple_client: AsyncMock,
-        sample_scenario: MagicMock,
         sample_initial_summary: InitialStateSummary,
     ) -> None:
         """Test that assessment start sends data with correct structure."""
@@ -363,7 +363,6 @@ class TestSendAssessmentStart:
 
         await green_agent._send_assessment_start(
             purple_client=mock_purple_client,
-            scenario=sample_scenario,
             initial_summary=sample_initial_summary,
             ues_url="http://127.0.0.1:8100",
             api_key="secret-key-123",
@@ -377,7 +376,7 @@ class TestSendAssessmentStart:
         assert data["message_type"] == "assessment_start"
         assert data["ues_url"] == "http://127.0.0.1:8100"
         assert data["api_key"] == "secret-key-123"
-        assert data["assessment_instructions"] == "Please triage all unread emails."
+        assert data["assessment_instructions"] == DEFAULT_ASSESSMENT_INSTRUCTIONS
         assert "initial_state_summary" in data
 
     @pytest.mark.asyncio
@@ -386,7 +385,6 @@ class TestSendAssessmentStart:
         green_agent: GreenAgent,
         mock_purple_client: AsyncMock,
         mock_ues_client: AsyncMock,
-        sample_scenario: MagicMock,
         sample_initial_summary: InitialStateSummary,
     ) -> None:
         """Test that assessment start includes current simulation time."""
@@ -395,7 +393,6 @@ class TestSendAssessmentStart:
 
         await green_agent._send_assessment_start(
             purple_client=mock_purple_client,
-            scenario=sample_scenario,
             initial_summary=sample_initial_summary,
             ues_url="http://127.0.0.1:8100",
             api_key="secret-key",
@@ -407,6 +404,31 @@ class TestSendAssessmentStart:
         assert expected_time.isoformat().startswith(
             data["current_time"][:19]
         ) or data["current_time"].startswith("2026-02-09")
+
+
+# =============================================================================
+# Tests for _inject_user_prompt_chat
+# =============================================================================
+
+
+class TestInjectUserPromptChat:
+    """Tests for injecting user_prompt into chat at assessment start."""
+
+    @pytest.mark.asyncio
+    async def test_inject_user_prompt_chat_sends_user_message(
+        self,
+        green_agent: GreenAgent,
+        mock_ues_client: AsyncMock,
+    ) -> None:
+        """Should send an immediate chat message with role='user'."""
+        await green_agent._inject_user_prompt_chat("Please triage my inbox.")
+
+        mock_ues_client.chat.send.assert_awaited_once_with(
+            role="user",
+            content="Please triage my inbox.",
+            conversation_id="user-assistant",
+        )
+
 
 
 # =============================================================================

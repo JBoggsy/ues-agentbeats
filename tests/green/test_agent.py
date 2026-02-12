@@ -33,6 +33,7 @@ from src.common.agentbeats.config import GreenAgentConfig
 from src.common.agentbeats.messages import (
     CalendarSummary,
     ChatSummary,
+    DEFAULT_ASSESSMENT_INSTRUCTIONS,
     EarlyCompletionMessage,
     EmailSummary,
     InitialStateSummary,
@@ -878,7 +879,6 @@ class TestPurpleCommunication:
     async def test_send_assessment_start_sends_correct_message(
         self,
         mock_purple_client: AsyncMock,
-        mock_scenario: MagicMock,
         mock_ues_client: AsyncMock,
     ) -> None:
         """_send_assessment_start() should send AssessmentStartMessage via purple_client."""
@@ -901,7 +901,6 @@ class TestPurpleCommunication:
 
             await agent._send_assessment_start(
                 purple_client=mock_purple_client,
-                scenario=mock_scenario,
                 initial_summary=initial_summary,
                 ues_url="http://127.0.0.1:8100",
                 api_key="test-key",
@@ -913,6 +912,10 @@ class TestPurpleCommunication:
             assert sent_data["message_type"] == "assessment_start"
             assert sent_data["ues_url"] == "http://127.0.0.1:8100"
             assert sent_data["api_key"] == "test-key"
+            assert (
+                sent_data["assessment_instructions"]
+                == DEFAULT_ASSESSMENT_INSTRUCTIONS
+            )
 
     @pytest.mark.asyncio
     async def test_send_assessment_complete_sends_correct_message(

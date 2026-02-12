@@ -393,6 +393,9 @@ class GreenAgent:
             # Reset UES and load scenario
             await self._setup_ues(scenario)
 
+            # Inject the scenario's user task into chat before Purple starts.
+            await self._inject_user_prompt_chat(scenario.user_prompt)
+
             # Create user API key for Purple
             user_api_key, user_key_id = await self._create_user_api_key(assessment_id)
 
@@ -432,7 +435,6 @@ class GreenAgent:
             ues_url = f"http://127.0.0.1:{self.ues_port}"
             await self._send_assessment_start(
                 purple_client=purple_client,
-                scenario=scenario,
                 initial_summary=initial_summary,
                 ues_url=ues_url,
                 api_key=user_api_key,
@@ -1005,7 +1007,6 @@ class GreenAgent:
     async def _send_assessment_start(
         self,
         purple_client: A2AClientWrapper,
-        scenario: ScenarioConfig,
         initial_summary: InitialStateSummary,
         ues_url: str,
         api_key: str,
@@ -1013,12 +1014,12 @@ class GreenAgent:
         """Send the ``AssessmentStartMessage`` to the Purple agent.
 
         Constructs and sends the initial message that kicks off an
-        assessment, providing Purple with the scenario context, UES
-        connection details, and initial state summary.
+        assessment, providing Purple with fixed high-level protocol
+        instructions, UES connection details, and initial state summary.
+        Scenario-specific tasks are delivered separately via chat.
 
         Args:
             purple_client: A2A client for the Purple agent.
-            scenario: Scenario configuration with user prompt and metadata.
             initial_summary: Summary of UES initial state (email counts,
                 calendar events, etc.).
             ues_url: Base URL for the UES server (e.g.,
@@ -1032,7 +1033,6 @@ class GreenAgent:
         message = AssessmentStartMessage(
             ues_url=ues_url,
             api_key=api_key,
-            assessment_instructions=scenario.user_prompt,
             current_time=time_state.current_time,
             initial_state_summary=initial_summary,
         )
@@ -1183,6 +1183,22 @@ class GreenAgent:
 
         # Start simulation with manual time control (Green advances time)
         await self.ues_client.simulation.start(auto_advance=False)
+
+    async def _inject_user_prompt_chat(self, user_prompt: str) -> None:
+        """Inject the scenario user prompt into chat as an immediate user message.
+
+        This is called at assessment start, before the first Purple turn,
+        so scenario-specific tasks are always delivered through the chat
+        modality.
+
+        Args:
+            user_prompt: Scenario task instructions to inject into chat.
+        """
+        await self.ues_client.chat.send(
+            role="user",
+            content=user_prompt,
+            conversation_id="user-assistant",
+        )
 
     # ------------------------------------------------------------------
     # State management (private)

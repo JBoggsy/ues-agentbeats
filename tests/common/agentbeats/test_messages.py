@@ -26,6 +26,7 @@ from src.common.agentbeats.messages import (
     SMSSummary,
     TurnCompleteMessage,
     TurnStartMessage,
+    DEFAULT_ASSESSMENT_INSTRUCTIONS,
     parse_message,
 )
 
@@ -290,14 +291,13 @@ class TestAssessmentStartMessage:
         msg = AssessmentStartMessage(
             ues_url="http://localhost:8080",
             api_key="secret-key",
-            assessment_instructions="Triage all unread emails.",
             current_time=sample_timestamp,
             initial_state_summary=sample_initial_state,
         )
         assert msg.message_type == "assessment_start"
         assert msg.ues_url == "http://localhost:8080"
         assert msg.api_key == "secret-key"
-        assert msg.assessment_instructions == "Triage all unread emails."
+        assert msg.assessment_instructions == DEFAULT_ASSESSMENT_INSTRUCTIONS
         assert msg.current_time == sample_timestamp
         assert msg.initial_state_summary == sample_initial_state
 
@@ -310,7 +310,6 @@ class TestAssessmentStartMessage:
         msg = AssessmentStartMessage(
             ues_url="http://localhost:8080",
             api_key="secret-key",
-            assessment_instructions="Test instructions",
             current_time=sample_timestamp,
             initial_state_summary=sample_initial_state,
         )
@@ -320,7 +319,23 @@ class TestAssessmentStartMessage:
         assert restored.message_type == msg.message_type
         assert restored.ues_url == msg.ues_url
         assert restored.api_key == msg.api_key
+        assert restored.assessment_instructions == DEFAULT_ASSESSMENT_INSTRUCTIONS
         assert restored.initial_state_summary == msg.initial_state_summary
+
+    def test_assessment_instructions_custom_value_rejected(
+        self,
+        sample_initial_state: InitialStateSummary,
+        sample_timestamp: datetime,
+    ):
+        """Custom assessment instructions should be rejected."""
+        with pytest.raises(ValidationError):
+            AssessmentStartMessage(
+                ues_url="http://localhost:8080",
+                api_key="secret-key",
+                assessment_instructions="Custom prompt",
+                current_time=sample_timestamp,
+                initial_state_summary=sample_initial_state,
+            )
 
 
 # =============================================================================

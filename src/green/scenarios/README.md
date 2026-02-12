@@ -8,7 +8,7 @@ Scenarios define everything needed to run an assessment:
 
 - **Metadata**: ID, name, description
 - **Timing**: Start/end times, default time step
-- **User Prompt**: The task given to the Purple agent
+- **User Prompt**: Scenario-specific task delivered to Purple via chat at assessment start
 - **Characters**: Simulated contacts with personalities and response patterns
 - **Initial State**: UES environment state (emails, calendar, SMS, etc.)
 - **Evaluation Criteria**: How to score Purple agent performance
@@ -35,7 +35,7 @@ src/green/scenarios/
 
 ### Evaluator Types (`schema.py`)
 
-- **`EvalResult`**: Return type for programmatic evaluators (score, explanation, details)
+- **`EvalResult`**: Return type for programmatic evaluators (score, max_score, explanation, details)
 - **`AgentBeatsEvalContext`**: Context passed to evaluators during assessment
 - **`EvaluatorFunc`**: Type alias for evaluator function signature
 - **`EvaluatorRegistry`**: Type alias for evaluator ID -> function mapping
@@ -72,6 +72,9 @@ evaluators = manager.get_evaluators("email_triage_basic")
 print(list(evaluators.keys()))  # ['check_urgent_email_responses', ...]
 ```
 
+Note: `scenario_id` must match the scenario directory name (for example, directory
+`scenarios/email_triage_basic/` must contain `"scenario_id": "email_triage_basic"`).
+
 ### Accessing Scenario Data
 
 ```python
@@ -106,6 +109,18 @@ for warning in warnings:
 ```
 
 ## Scenario File Format
+
+### Prompt Delivery Contract
+
+At assessment start, Green applies this fixed behavior:
+
+1. Sends a **fixed** `assessment_start.assessment_instructions` message telling Purple
+  to act as a personal assistant and read specific tasks from chat.
+2. Injects `scenario.user_prompt` as an **immediate chat message from the user** before
+  Purple's first turn.
+
+Scenario authors should treat `user_prompt` as the canonical scenario task request that
+will be delivered through the chat modality by Green.
 
 Scenarios are stored as JSON files in subdirectories of the `scenarios/` directory:
 
@@ -180,6 +195,20 @@ user_profile = scenario_config.get_user_character_profile()
 print(f"Assisting: {user_profile.name} ({user_profile.email})")
 ```
 
+### Character Validation Rules
+
+Each character must define at least one contact method:
+
+- `email`, or
+- `phone`, or
+- both.
+
+Additional validation enforced by `ScenarioConfig`:
+
+- Character emails must be unique (if present)
+- Character phone numbers must be unique (if present)
+- `user_character` must reference a key in `characters`
+
 ### Initial State Options
 
 The `initial_state` field can be:
@@ -187,6 +216,8 @@ The `initial_state` field can be:
 1. **Embedded**: A JSON object directly in scenario.json
 2. **Default file**: Omit the field, and `initial_state.json` will be loaded
 3. **Custom path**: A string path relative to the scenario directory
+
+If `initial_state` is omitted and `initial_state.json` does not exist, loading fails.
 
 #### Initial State Format (UES Export Format)
 
@@ -270,6 +301,10 @@ Criteria support two evaluation methods:
 
 At least one method must be specified. Both can be used together.
 
+Important: `assessment_start.assessment_instructions` is fixed and shared across all
+scenarios. Scenario-specific instructions should be authored in `user_prompt`, which
+Green injects into chat at assessment start.
+
 ## Programmatic Evaluators
 
 Scenarios can include an `evaluators.py` file with programmatic evaluation functions:
@@ -283,7 +318,7 @@ async def check_response_accuracy(
     params: dict,
 ) -> EvalResult:
     """Check that responses are accurate."""
-    # Access UES state via ctx.ues_client
+  # Access UES state via ctx.client
     # Access action history via ctx.action_log
     # Access scenario config via ctx.scenario_config
     # Use params from the criterion definition
@@ -293,7 +328,8 @@ async def check_response_accuracy(
     # ... evaluate actions ...
     
     return EvalResult(
-        score=correct_count / total_count if total_count else 1.0,
+        score=float(correct_count),
+        max_score=float(total_count) if total_count else 1.0,
         explanation=f"Correctly handled {correct_count} of {total_count} items",
         details={"correct": correct_count, "total": total_count},
     )
@@ -302,10 +338,12 @@ async def check_response_accuracy(
 ### Evaluator Requirements
 
 - Must be `async def` (async function)
-- Must accept exactly 2 parameters: `ctx: AgentBeatsEvalContext`, `params: dict`
-- Must return `EvalResult`
+- Must accept at least 2 parameters (first two should be `ctx`, `params`)
 - Must not start with underscore (private functions are excluded)
 - Function name becomes the `evaluator_id` referenced in criteria
+
+Runtime expectation (not enforced at import-time): evaluators should return
+`EvalResult` so the `CriteriaJudge` can scale scores correctly.
 
 ### Loading and Validating Evaluators
 

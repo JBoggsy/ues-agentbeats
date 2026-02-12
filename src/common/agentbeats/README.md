@@ -64,10 +64,12 @@ initial_state = InitialStateSummary(
 start_msg = AssessmentStartMessage(
     ues_url="http://localhost:8100",  # Provided by GreenAgent
     api_key="user-level-token-...",    # Generated per-assessment
-    assessment_instructions="Triage all unread emails by priority.",
     current_time=datetime.now(tz=timezone.utc),
     initial_state_summary=initial_state,
 )
+
+# assessment_instructions uses a fixed default protocol string;
+# scenario-specific tasks are delivered via chat modality.
 
 # Green agent sends TurnStartMessage at each turn
 turn_msg = TurnStartMessage(

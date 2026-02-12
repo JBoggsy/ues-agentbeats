@@ -40,7 +40,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+DEFAULT_ASSESSMENT_INSTRUCTIONS = (
+    "Act as the user's personal assistant. The user's specific tasks are provided via "
+    "the chat modality; read chat and complete those tasks."
+)
 
 
 # =============================================================================
@@ -215,8 +221,8 @@ class AssessmentStartMessage(BaseModel):
         message_type: Fixed identifier for this message type.
         ues_url: URL of the UES server to connect to.
         api_key: API key for authenticating with UES.
-        assessment_instructions: Instructions describing what the Purple agent
-            should accomplish during the assessment.
+        assessment_instructions: Fixed high-level instructions for Purple.
+            Specific scenario tasks are delivered via chat messages from the user.
         current_time: The current simulated time in UES.
         initial_state_summary: Summary of the initial UES state.
 
@@ -224,7 +230,6 @@ class AssessmentStartMessage(BaseModel):
         >>> msg = AssessmentStartMessage(
         ...     ues_url="http://localhost:8080",
         ...     api_key="secret-key",
-        ...     assessment_instructions="Triage all unread emails.",
         ...     current_time=datetime.now(tz=timezone.utc),
         ...     initial_state_summary=state  # InitialStateSummary object
         ... )
@@ -238,12 +243,23 @@ class AssessmentStartMessage(BaseModel):
     ues_url: str = Field(..., description="UES server URL")
     api_key: str = Field(..., description="UES API key")
     assessment_instructions: str = Field(
-        ..., description="Instructions for the assessment"
+        default=DEFAULT_ASSESSMENT_INSTRUCTIONS,
+        description="Fixed high-level instructions for the assessment",
     )
     current_time: datetime = Field(..., description="Current simulated time")
     initial_state_summary: InitialStateSummary = Field(
         ..., description="Initial UES state summary"
     )
+
+    @field_validator("assessment_instructions")
+    @classmethod
+    def validate_assessment_instructions(cls, value: str) -> str:
+        """Ensure assessment instructions always use the fixed protocol text."""
+        if value != DEFAULT_ASSESSMENT_INSTRUCTIONS:
+            raise ValueError(
+                "assessment_instructions must use the default fixed instructions"
+            )
+        return value
 
 
 class TurnStartMessage(BaseModel):

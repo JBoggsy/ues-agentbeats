@@ -106,7 +106,8 @@ class AgentBeatsEvalContext:
         action_log: List of actions taken by the Purple agent.
         initial_state: Modality snapshots before assessment.
         final_state: Modality snapshots after assessment.
-        user_prompt: The task description given to the Purple agent.
+        user_prompt: The task description delivered to Purple via chat at
+            assessment start.
 
     Note:
         The client has proctor-level access for evaluation purposes,
@@ -481,7 +482,7 @@ class ScenarioConfig(BaseModel):
         start_time: Assessment start time (timezone-aware).
         end_time: Assessment end time (timezone-aware).
         default_time_step: Default time advance per turn (ISO 8601 duration).
-        user_prompt: The task description given to the Purple agent via chat.
+        user_prompt: The task description given to the Purple agent.
         user_character: Key of the character in `characters` that represents the user.
         characters: Mapping of character ID to CharacterProfile.
         initial_state: Full UES scenario export (metadata, environment, events).
@@ -539,7 +540,7 @@ class ScenarioConfig(BaseModel):
     user_prompt: str = Field(
         ...,
         min_length=1,
-        description="Task description given to Purple agent via chat",
+        description="Task description injected into chat for Purple at assessment start",
     )
     user_character: str = Field(
         ...,
