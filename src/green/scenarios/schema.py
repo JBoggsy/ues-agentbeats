@@ -34,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 if TYPE_CHECKING:
     # Avoid circular import - these types are only needed for type hints
+    from langchain_core.language_models.chat_models import BaseChatModel
     from ues.client import AsyncUESClient
 
     # Forward reference for ActionLogEntry from results module
@@ -108,6 +109,9 @@ class AgentBeatsEvalContext:
         final_state: Modality snapshots after assessment.
         user_prompt: The task description delivered to Purple via chat at
             assessment start.
+        llm: Optional LangChain LLM for evaluators that need LLM-assisted
+            analysis. Injected by CriteriaJudge before calling programmatic
+            evaluators. None if no LLM is configured.
 
     Note:
         The client has proctor-level access for evaluation purposes,
@@ -120,6 +124,7 @@ class AgentBeatsEvalContext:
     initial_state: dict[str, Any]
     final_state: dict[str, Any]
     user_prompt: str
+    llm: BaseChatModel | None = None
 
     async def get_state(self, modality: str) -> Any:
         """Get current modality state from UES.

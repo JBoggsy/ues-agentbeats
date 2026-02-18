@@ -36,7 +36,7 @@ src/green/scenarios/
 ### Evaluator Types (`schema.py`)
 
 - **`EvalResult`**: Return type for programmatic evaluators (score, max_score, explanation, details)
-- **`AgentBeatsEvalContext`**: Context passed to evaluators during assessment
+- **`AgentBeatsEvalContext`**: Context passed to evaluators during assessment (includes optional `llm: BaseChatModel` for evaluators that need LLM access)
 - **`EvaluatorFunc`**: Type alias for evaluator function signature
 - **`EvaluatorRegistry`**: Type alias for evaluator ID -> function mapping
 
@@ -127,8 +127,11 @@ Scenarios are stored as JSON files in subdirectories of the `scenarios/` directo
 ```
 scenarios/
 └── email_triage_basic/
+    ├── __init__.py        # Package init (enables sibling imports)
     ├── scenario.json      # Main scenario configuration
     ├── initial_state.json # UES state (optional, can be embedded)
+    ├── ground_truth.py    # Canonical data for evaluators (optional)
+    ├── _eval_helpers.py   # Shared helper functions (optional, private)
     └── evaluators.py      # Programmatic evaluators (optional)
 ```
 
@@ -318,10 +321,11 @@ async def check_response_accuracy(
     params: dict,
 ) -> EvalResult:
     """Check that responses are accurate."""
-  # Access UES state via ctx.client
+    # Access UES state via ctx.client
     # Access action history via ctx.action_log
     # Access scenario config via ctx.scenario_config
     # Use params from the criterion definition
+    # Use ctx.llm for LLM calls (BaseChatModel, injected by CriteriaJudge)
     
     correct_count = 0
     total_count = len(ctx.action_log)
@@ -335,12 +339,16 @@ async def check_response_accuracy(
     )
 ```
 
+**Reference implementation**: See `scenarios/email_triage_basic/evaluators.py` for a complete example with 8 evaluators including LLM batch calls, shared helpers, and ground truth imports.
+
 ### Evaluator Requirements
 
 - Must be `async def` (async function)
 - Must accept at least 2 parameters (first two should be `ctx`, `params`)
 - Must not start with underscore (private functions are excluded)
 - Function name becomes the `evaluator_id` referenced in criteria
+- **Sibling imports**: Evaluators can import other modules in the same scenario directory using standard imports (e.g., `import ground_truth`). The `ScenarioLoader` temporarily adds the scenario directory to `sys.path` during module import.
+- **LLM access**: Evaluators that need LLM calls can use `ctx.llm` (a `BaseChatModel` instance injected by the `CriteriaJudge`). Check for `None` if LLM may not be available.
 
 Runtime expectation (not enforced at import-time): evaluators should return
 `EvalResult` so the `CriteriaJudge` can scale scores correctly.
@@ -423,7 +431,10 @@ Tests cover:
 - Serialization/deserialization
 - Evaluator types (EvalResult, AgentBeatsEvalContext)
 - File loading (embedded, external, referenced states)
-- Evaluator loading (dynamic module import)
+- Evaluator loading (dynamic module import, sibling imports)
 - Error handling (missing files, invalid data, syntax errors)
+- Manager caching behavior (scenarios and evaluators)
+- Validation warnings
+- Scenario-specific evaluators (`email_triage_basic`): 38 evaluator tests + 35 helper tests
 - Manager caching behavior (scenarios and evaluators)
 - Validation warnings

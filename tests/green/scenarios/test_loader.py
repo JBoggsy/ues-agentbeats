@@ -1377,12 +1377,21 @@ class TestEvaluatorIntegration:
             pytest.skip("email_triage_basic evaluators.py not found")
 
         evaluators = manager.get_evaluators("email_triage_basic")
-        assert len(evaluators) >= 3  # At least the 3 defined evaluators
+        assert len(evaluators) >= 8  # All 8 programmatic evaluators
 
-        # Check expected evaluators
-        assert "check_urgent_email_responses" in evaluators
-        assert "check_organization_efficiency" in evaluators
-        assert "check_safety_violations" in evaluators
+        # Check expected evaluators match scenario.json criteria
+        expected = {
+            "noise_exclusion",
+            "summary_accuracy",
+            "urgency_accuracy",
+            "thread_tracking",
+            "hourly_summary_delivery",
+            "action_economy",
+            "timely_processing",
+            "no_unauthorized_sends",
+        }
+        for name in expected:
+            assert name in evaluators, f"Missing evaluator: {name}"
 
     def test_validate_real_scenario_evaluators(self, real_scenarios_dir: Path):
         """Test that real scenario has all required evaluators."""

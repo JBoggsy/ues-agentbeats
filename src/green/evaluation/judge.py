@@ -339,6 +339,9 @@ class CriteriaJudge:
                 criterion.evaluator_id,
             )
             evaluator = self._evaluators[criterion.evaluator_id]
+            # Inject LLM into context for evaluators that need it
+            if ctx.llm is None:
+                ctx.llm = self._llm
             eval_result = await evaluator(ctx, criterion.params or {})
             evaluation_method = "programmatic"
 

@@ -327,6 +327,11 @@ class ScenarioLoader:
     def _import_module(self, module_path: Path, module_name: str) -> ModuleType:
         """Dynamically import a Python module from a file path.
 
+        The module's parent directory is temporarily added to ``sys.path``
+        so that sibling modules (e.g. ``ground_truth.py``,
+        ``_eval_helpers.py``) can be imported with regular ``import``
+        statements from within the evaluators module.
+
         Args:
             module_path: Path to the .py file.
             module_name: Name to give the module in sys.modules.
@@ -344,12 +349,26 @@ class ScenarioLoader:
         module = importlib.util.module_from_spec(spec)
         sys.modules[module_name] = module
 
+        # Add the scenario directory to sys.path so sibling imports work
+        scenario_dir_str = str(module_path.parent.resolve())
+        path_added = False
+        if scenario_dir_str not in sys.path:
+            sys.path.insert(0, scenario_dir_str)
+            path_added = True
+
         try:
             spec.loader.exec_module(module)
         except Exception:
             # Clean up sys.modules on failure
             sys.modules.pop(module_name, None)
             raise
+        finally:
+            # Clean up sys.path to avoid polluting the import namespace
+            if path_added:
+                try:
+                    sys.path.remove(scenario_dir_str)
+                except ValueError:
+                    pass
 
         return module
 
