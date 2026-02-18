@@ -39,6 +39,7 @@ from src.green.evaluation import (
     CriteriaJudgeError,
     EvaluationError,
 )
+from src.green.executor import AssessmentRequest, GreenAgentExecutor
 from src.green.scenarios import (
     CharacterProfile,
     EvaluationCriterion,
@@ -53,6 +54,9 @@ from src.green.scenarios import (
 __all__ = [
     # GreenAgent orchestrator
     "GreenAgent",
+    # Executor (A2A bridge)
+    "AssessmentRequest",
+    "GreenAgentExecutor",
     # Core infrastructure
     "ActionLogBuilder",
     "ActionLogBuilderError",

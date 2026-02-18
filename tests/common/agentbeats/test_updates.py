@@ -867,7 +867,7 @@ class TestTaskUpdateEmitter:
     async def test_assessment_completed(
         self, emitter: TaskUpdateEmitter, mock_updater: MagicMock
     ) -> None:
-        """assessment_completed sends terminal update."""
+        """assessment_completed sends working update (not terminal)."""
         await emitter.assessment_completed(
             reason="scenario_complete",
             total_turns=10,
@@ -877,10 +877,10 @@ class TestTaskUpdateEmitter:
             max_score=100,
         )
 
-        # Should use completed state
+        # Should use working state — executor owns terminal state
         mock_updater.update_status.assert_called_once()
         call_kwargs = mock_updater.update_status.call_args.kwargs
-        assert call_kwargs["state"] == TaskState.completed
+        assert call_kwargs["state"] == TaskState.working
 
         data_part = call_kwargs["message"].parts[0].root
         assert data_part.data["message_type"] == "update_assessment_completed"

@@ -38,6 +38,7 @@ src/green/
 │   ├── schema.py          # Pydantic models for scenarios
 │   ├── loader.py          # Scenario discovery and loading
 │   └── README.md          # Scenario module documentation
+├── executor.py             # A2A executor bridge (✅ complete)
 ├── prompts/                # Re-exports (deprecated, for backwards compat)
 │   └── __init__.py
 └── assessment/             # Assessment orchestration (🚧 in progress)
@@ -195,5 +196,6 @@ Ollama models require a running Ollama server at `localhost:11434`.
 ## Design Documents
 
 - [Response Generation Design](../../docs/design/RESPONSE_GENERATION_DESIGN.md)
+- [Green Executor Design](../../docs/design/GREEN_EXECUTOR_DESIGN.md)
 - [Assessment Flow](../../docs/ASSESSMENT_FLOW.md)
 - [Implementation Plan](../../docs/IMPLEMENTATION_PLAN.md)

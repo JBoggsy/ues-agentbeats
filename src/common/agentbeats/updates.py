@@ -766,6 +766,10 @@ class TaskUpdateEmitter:
     ) -> None:
         """Emit an assessment completed update.
 
+        This emits a ``TaskState.working`` update, not a terminal state.
+        The executor is responsible for emitting the terminal
+        ``TaskState.completed`` after attaching the results artifact.
+
         Args:
             reason: Why the assessment ended.
             total_turns: Total number of turns taken.
@@ -782,8 +786,8 @@ class TaskUpdateEmitter:
             overall_score=overall_score,
             max_score=max_score,
         )
-        # Assessment completed is a terminal state
-        await self._emit(update, state=TaskState.completed)
+        # Assessment completed is informational — executor owns terminal state
+        await self._emit(update, state=TaskState.working)
 
     async def error_occurred(
         self,
