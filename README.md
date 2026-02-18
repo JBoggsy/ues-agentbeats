@@ -42,15 +42,14 @@ src/
 │   └── agentbeats/   # AgentBeats-specific utilities (complete)
 ├── green/            # Green agent implementation
 │   ├── scenarios/    # Scenario schema and loader (complete)
-│   ├── prompts/      # LLM prompt templates (complete)
-│   ├── action_log.py # Action log builder (complete)
-│   ├── llm_config.py # LLM factory (complete)
-│   ├── message_collector.py  # New message collector (complete)
-│   ├── response_models.py    # Response data models (complete)
-│   └── response_generator.py # Character response generation (complete)
+│   ├── evaluation/   # Criteria judge (complete)
+│   ├── response/     # Character response generation (complete)
+│   ├── core/         # LLM config, action log, message collector (complete)
+│   └── assessment/   # Assessment orchestration (in progress)
 └── purple/           # Purple agent template
-scenarios/            # Assessment scenarios
-tests/                # Test suite (1,424 tests)
+scenarios/
+└── email_triage_basic/  # First scenario (complete — config, state, evaluators)
+tests/                # Test suite (1,542 tests)
 docs/                 # Documentation
 ```
 
@@ -112,6 +111,8 @@ OPENAI_API_KEY=sk-your-key-here
 - [x] Implement criteria judge (`src/green/evaluation/`)
 - [x] Implement GreenAgent with full turn loop, UES management, Purple communication
 - [x] Full test suite: 1,424 tests passing (0 failures, 0 skipped)
+- [x] Email Triage Basic scenario: evaluators complete (ground_truth.py, _eval_helpers.py, evaluators.py — 73 scenario tests)
+- [x] Full test suite: 1,542 tests passing (0 failures, 0 skipped)
 
 ### Phase 4: Purple Agent Template
 - [ ] Implement base agent class (`src/purple/base_agent.py`)

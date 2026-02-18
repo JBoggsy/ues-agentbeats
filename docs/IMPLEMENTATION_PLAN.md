@@ -610,7 +610,7 @@ field validation, configuration merging, and validation warnings.
 
 ---
 
-## Phase 3: Green Agent Implementation ✅ COMPLETE
+## Phase 3: Green Agent Implementation 
 
 **Location**: `src/green/`
 
@@ -625,7 +625,7 @@ The Green Agent orchestrates assessments, manages UES, and evaluates Purple agen
 - 3.6 Response Generation — ✅ COMPLETE (54 unit + 11 integration tests)
 - 3.7 Criteria Judge — ✅ COMPLETE
 - 3.8 Green Agent (`agent.py`) — ✅ COMPLETE (22/22 methods, 6,073 lines of tests, 191 tests)
-- 3.9 Green Agent Executor — not started
+- 3.9 Green Agent Executor — ✅ COMPLETE (41 tests)
 - 3.10 Module Structure — updated
 
 ### 3.1 Architecture Overview
@@ -2008,243 +2008,20 @@ class GreenAgent:
 | `_send_assessment_complete()` | Send `AssessmentCompleteMessage` to Purple |
 | `_build_results()` | Construct `AssessmentResults` from evaluation data |
 
-### 3.9 Green Agent Executor (`executor.py`)
+### 3.9 Green Agent Executor (`executor.py`) ✅ COMPLETE
 
 The executor is the entry point for A2A requests. It implements the `AgentExecutor`
-interface from the A2A SDK and is responsible for managing `GreenAgent` instances
-and routing assessment requests to them. Depends on `GreenAgent` (3.8) and
-`ScenarioManager` (3.2). Uses `A2AClientWrapper` from `src/common/a2a/` for
-Purple agent communication.
+interface from the A2A SDK and bridges between the A2A protocol layer and
+`GreenAgent`. See `docs/design/GREEN_EXECUTOR_DESIGN.md` for design details
+and `docs/design/GREEN_EXECUTOR_IMPLEMENTATION_PLAN.md` for the step-by-step
+implementation record.
 
-**Responsibilities:**
-1. Validate incoming assessment requests (`EvalRequest` format)
-2. Manage `GreenAgent` instances keyed by `context_id`
-3. Allocate unique UES ports for new `GreenAgent` instances
-4. Create `TaskUpdater` for A2A event emission
-5. Load scenarios and evaluators via `ScenarioManager`
-6. Create A2A client wrapper for Purple agent communication
-7. Delegate assessment execution to `GreenAgent.run()`
-8. Handle task cancellation
+**Key classes:**
+- `AssessmentRequest` — frozen Pydantic model for incoming assessment requests
+- `_PortAllocator` — sequential UES port allocation
+- `GreenAgentExecutor` — `AgentExecutor` implementation with `execute()`, `cancel()`, `shutdown()`
 
-```python
-from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.events import EventQueue
-from a2a.server.tasks import TaskUpdater
-from a2a.types import Task, TaskState
-from a2a.utils import new_task, new_agent_text_message
-
-from src.common.agentbeats.updates import TaskUpdateEmitter
-
-class EvalRequest(BaseModel):
-    """Assessment request format from AgentBeats platform.
-    
-    Follows the AgentBeats green agent template pattern.
-    """
-    participants: dict[str, HttpUrl]  # role -> agent URL (e.g., {"assistant": "http://..."})
-    config: dict[str, Any]  # Assessment config including scenario_id
-
-class GreenAgentExecutor(AgentExecutor):
-    """A2A executor for the Green Agent.
-    
-    Manages GreenAgent instances and routes assessment requests. Each unique
-    context_id gets its own GreenAgent instance with its own UES server.
-    
-    Attributes:
-        scenario_manager: Loads scenarios and evaluators from disk.
-        config: Green agent configuration.
-        agents: Map of context_id -> GreenAgent instances.
-        _next_ues_port: Port allocator for UES servers.
-    """
-    
-    def __init__(
-        self,
-        scenario_manager: ScenarioManager,
-        config: GreenAgentConfig,
-    ):
-        self.scenario_manager = scenario_manager
-        self.config = config
-        self.agents: dict[str, GreenAgent] = {}  # context_id -> GreenAgent
-        self._next_ues_port = config.ues_base_port  # e.g., 8100
-        self._port_lock = asyncio.Lock()
-    
-    async def execute(
-        self,
-        context: RequestContext,
-        event_queue: EventQueue,
-    ) -> None:
-        """Handle incoming assessment request.
-        
-        Called by the A2A server when a new message arrives. This method:
-        1. Validates the request format
-        2. Gets or creates a Task for tracking
-        3. Gets or creates a GreenAgent for this context
-        4. Loads the scenario and evaluators
-        5. Creates the Purple agent A2A client
-        6. Runs the assessment
-        7. Emits results as an artifact
-        
-        Args:
-            context: Request context with message, task_id, context_id, etc.
-            event_queue: Queue for emitting A2A events (task updates, artifacts).
-        """
-        # Validate request has a message
-        if not context.message:
-            raise ServerError(error=InvalidRequestError(message="Missing message"))
-        
-        # Get or create task
-        task = context.current_task
-        if task and task.status.state in TERMINAL_STATES:
-            raise ServerError(error=InvalidRequestError(
-                message=f"Task {task.id} already completed"
-            ))
-        if not task:
-            task = new_task(context.message)
-            await event_queue.enqueue_event(task)
-        
-        context_id = task.context_id
-        task_id = task.id
-        
-        # Create TaskUpdater for emitting events
-        updater = TaskUpdater(event_queue, task_id, context_id)
-        await updater.start_work()
-        
-        try:
-            # Parse and validate the assessment request
-            request_text = get_message_text(context.message)
-            eval_request = EvalRequest.model_validate_json(request_text)
-            
-            # Validate required fields
-            if "assistant" not in eval_request.participants:
-                await updater.reject(new_agent_text_message(
-                    "Missing 'assistant' role in participants"
-                ))
-                return
-            
-            scenario_id = eval_request.config.get("scenario_id")
-            if not scenario_id:
-                await updater.reject(new_agent_text_message(
-                    "Missing 'scenario_id' in config"
-                ))
-                return
-            
-            # Get or create GreenAgent for this context
-            agent = await self._get_or_create_agent(context_id)
-            
-            # Load scenario and evaluators
-            try:
-                scenario = self.scenario_manager.get_scenario(scenario_id)
-                evaluators = self.scenario_manager.get_evaluators(scenario_id)
-            except ScenarioNotFoundError as e:
-                await updater.reject(new_agent_text_message(str(e)))
-                return
-            
-            # Create A2A client for Purple agent
-            purple_url = str(eval_request.participants["assistant"])
-            purple_client = await self._create_purple_client(purple_url)
-            
-            # Create TaskUpdateEmitter for structured updates
-            emitter = TaskUpdateEmitter(updater)
-            
-            # Run the assessment
-            results = await agent.run(
-                task_id=task_id,
-                emitter=emitter,
-                scenario=scenario,
-                evaluators=evaluators,
-                purple_client=purple_client,
-                assessment_config=eval_request.config,
-            )
-            
-            # Emit results as artifact
-            await updater.add_artifact(
-                parts=[
-                    Part(root=TextPart(text="Assessment completed successfully.")),
-                    Part(root=DataPart(data=results.model_dump())),
-                ],
-                name="assessment_results",
-            )
-            await updater.complete()
-            
-        except Exception as e:
-            logger.exception(f"Assessment failed: {e}")
-            await updater.failed(new_agent_text_message(f"Assessment error: {e}"))
-    
-    async def cancel(
-        self,
-        context: RequestContext,
-        event_queue: EventQueue,
-    ) -> None:
-        """Handle cancellation request.
-        
-        Cancels an ongoing assessment for the given task. Signals the
-        GreenAgent to stop and emits a cancelled status.
-        
-        Args:
-            context: Request context with task_id to cancel.
-            event_queue: Queue for emitting cancellation status.
-        """
-        task_id = context.task_id
-        context_id = context.context_id
-        
-        # Find the agent handling this context
-        if context_id and context_id in self.agents:
-            agent = self.agents[context_id]
-            await agent.cancel(task_id)
-        
-        # Emit cancellation status
-        updater = TaskUpdater(event_queue, task_id, context_id)
-        await updater.cancel()
-    
-    async def _get_or_create_agent(self, context_id: str) -> GreenAgent:
-        """Get existing GreenAgent or create a new one for this context.
-        
-        Each context_id gets its own GreenAgent with its own UES server.
-        This ensures Purple agents being assessed in parallel don't
-        interfere with each other.
-        
-        Args:
-            context_id: The conversation context identifier.
-            
-        Returns:
-            GreenAgent instance for this context.
-        """
-        if context_id not in self.agents:
-            # Allocate a unique port for this agent's UES server
-            async with self._port_lock:
-                ues_port = self._next_ues_port
-                self._next_ues_port += 1
-            
-            # Create new GreenAgent
-            agent = GreenAgent(ues_port=ues_port, config=self.config)
-            await agent.startup()
-            self.agents[context_id] = agent
-        
-        return self.agents[context_id]
-    
-    async def _create_purple_client(self, url: str) -> A2AClientWrapper:
-        """Create an A2A client wrapper for communicating with Purple agent.
-        
-        Args:
-            url: The Purple agent's base URL.
-            
-        Returns:
-            Configured A2A client wrapper.
-        """
-        return A2AClientWrapper(base_url=url, timeout=self.config.default_turn_timeout)
-    
-    async def cleanup(self) -> None:
-        """Shutdown all GreenAgent instances.
-        
-        Called when the server is shutting down. Ensures all UES servers
-        are properly terminated.
-        """
-        for context_id, agent in self.agents.items():
-            try:
-                await agent.shutdown()
-            except Exception as e:
-                logger.warning(f"Error shutting down agent for {context_id}: {e}")
-        self.agents.clear()
-```
+**Tests:** 41 tests across 8 test classes in `tests/green/test_executor.py`.
 
 ### 3.10 Module Structure Summary
 
@@ -2253,6 +2030,7 @@ src/green/
 ├── __init__.py
 ├── README.md
 ├── agent.py               # 3.8 ✅ COMPLETE - assessment orchestration, UES management
+├── executor.py            # 3.9 ✅ COMPLETE - A2A executor bridge
 ├── assessment/
 │   ├── __init__.py
 │   └── models.py          # TurnResult, EndOfTurnResult ✅ COMPLETE
@@ -2796,7 +2574,17 @@ ues-agentbeats/
 - [x] Implement LLM configuration/factory
 - [x] Integration tests with Ollama and OpenAI
 - [x] Integrate LangChain for criteria judging
-- [ ] Create first complete scenario
+- [x] Create first complete scenario (email_triage_basic)
+
+### Week 3.5: Scenario Evaluators ✅ COMPLETE
+- [x] Implement `ground_truth.py` — canonical email classifications, urgency labels, thread membership, hourly expectations (1,390 lines)
+- [x] Implement `_eval_helpers.py` — shared helpers for summary extraction, email-to-summary assignment, LLM batch calls
+- [x] Implement `evaluators.py` — 8 programmatic evaluators (noise_exclusion, summary_accuracy, urgency_accuracy, thread_tracking, hourly_summary_delivery, action_economy, timely_processing, no_unauthorized_sends)
+- [x] Add `llm` field to `AgentBeatsEvalContext` for evaluator LLM access
+- [x] Update `CriteriaJudge` to inject LLM into evaluator context
+- [x] Update `ScenarioLoader` to support sibling imports in scenario modules
+- [x] Write evaluator tests (38 tests) and helper tests (35 tests)
+- [x] Full test suite: 1,542 tests passing (0 failures, 0 skipped)
 
 ### Week 4: Purple Agent Template (Days 15-17)
 - [ ] Implement base agent class
@@ -2827,7 +2615,7 @@ ues-agentbeats/
 - LLM calls for judging use temperature=0
 
 ### Testing Strategy
-- Unit tests for all helper modules (768+ tests total)
+- Unit tests for all helper modules (1,542+ tests total)
 - Integration tests with real LLMs (Ollama and OpenAI)
 - Integration tests with mock A2A agents
 - End-to-end tests with actual UES instance
@@ -2842,4 +2630,4 @@ ues-agentbeats/
 ---
 
 *Document created: January 28, 2026*
-*Last updated: January 29, 2026*
+*Last updated: February 17, 2026*
