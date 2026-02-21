@@ -268,10 +268,15 @@ The initial state must use the UES `/scenario/import/full` endpoint format with 
 **Required sections:**
 - `metadata` - Version and creation metadata
 - `environment.time_state` - Simulation time configuration
-- `environment.modality_states` - State for each modality (email, calendar, sms, chat)
+- `environment.modality_states` - State for **all four** modalities: `email`, `calendar`, `sms`, `chat`
 - `events` - Event log (typically empty at start)
 
 Each modality in `modality_states` must include a `modality_type` field matching its key name.
+
+**All four modalities are required**, even if a scenario only actively uses some of them.
+Modalities not central to the scenario should include an empty but valid state (e.g.,
+empty `messages`, `calendars`, etc.). This is enforced by `ScenarioConfig` validation
+at load time — missing modalities will raise a `ValidationError`.
 
 ## Time Formats
 

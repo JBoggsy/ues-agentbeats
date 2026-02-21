@@ -65,14 +65,20 @@ def sample_criterion_data() -> dict[str, Any]:
 def sample_initial_state() -> dict[str, Any]:
     """Create sample initial state data."""
     return {
-        "email": {
-            "folders": [
-                {"name": "Inbox", "unread_count": 5},
-                {"name": "Sent", "unread_count": 0},
-            ]
-        },
-        "calendar": {"events": []},
-        "sms": {"conversations": []},
+        "environment": {
+            "modality_states": {
+                "email": {
+                    "modality_type": "email",
+                    "folders": [
+                        {"name": "Inbox", "unread_count": 5},
+                        {"name": "Sent", "unread_count": 0},
+                    ],
+                },
+                "calendar": {"modality_type": "calendar", "events": []},
+                "sms": {"modality_type": "sms", "conversations": []},
+                "chat": {"modality_type": "chat"},
+            }
+        }
     }
 
 
@@ -267,7 +273,7 @@ class TestScenarioLoader:
 
         assert isinstance(config, ScenarioConfig)
         assert config.scenario_id == "email_triage_basic"
-        assert "email" in config.initial_state
+        assert "email" in config.initial_state["environment"]["modality_states"]
 
     def test_load_external_state_default_file(
         self, scenario_with_external_state: Path
@@ -277,7 +283,7 @@ class TestScenarioLoader:
         config = loader.load()
 
         assert isinstance(config, ScenarioConfig)
-        assert "email" in config.initial_state
+        assert "email" in config.initial_state["environment"]["modality_states"]
 
     def test_load_state_reference(self, scenario_with_state_reference: Path):
         """Test loading scenario with initial_state as file path."""
@@ -285,7 +291,7 @@ class TestScenarioLoader:
         config = loader.load()
 
         assert isinstance(config, ScenarioConfig)
-        assert "email" in config.initial_state
+        assert "email" in config.initial_state["environment"]["modality_states"]
 
     def test_load_missing_scenario_file_raises(self, tmp_path: Path):
         """Test that missing scenario.json raises FileNotFoundError."""
@@ -754,21 +760,23 @@ class TestScenarioManager:
         scenarios_dir: Path,
         sample_scenario_data: dict[str, Any],
     ):
-        """Test warning for empty initial_state."""
+        """Test that empty initial_state raises ValidationError.
+
+        Empty initial_state is now rejected at model validation time (missing
+        all four required modalities) rather than producing a soft warning.
+        """
         data = {
             **sample_scenario_data,
             "scenario_id": "empty_state",
-            "initial_state": {},  # Empty
+            "initial_state": {},  # Empty — missing all modalities
         }
         scenario_dir = scenarios_dir / "empty_state"
         scenario_dir.mkdir()
         (scenario_dir / "scenario.json").write_text(json.dumps(data))
 
         manager = ScenarioManager(scenarios_dir)
-        config = manager.load_scenario("empty_state")
-        warnings = manager.validate_scenario(config)
-
-        assert any("initial_state is empty" in w for w in warnings)
+        with pytest.raises(ScenarioValidationError):
+            manager.load_scenario("empty_state")
 
     def test_validate_scenario_short_prompt_warning(
         self,

@@ -103,7 +103,16 @@ def sample_scenario(
         user_prompt="Please triage my inbox and respond to urgent emails.",
         user_character="alice",
         characters={"alice": sample_character},
-        initial_state={"email": {"folders": []}},
+        initial_state={
+            "environment": {
+                "modality_states": {
+                    "email": {"modality_type": "email"},
+                    "sms": {"modality_type": "sms"},
+                    "calendar": {"modality_type": "calendar"},
+                    "chat": {"modality_type": "chat"},
+                }
+            }
+        },
         criteria=[sample_criterion],
     )
 
@@ -523,7 +532,16 @@ class TestScenarioConfig:
             "user_prompt": "Test prompt for the scenario.",
             "user_character": "alice",
             "characters": {"alice": sample_character},
-            "initial_state": {},
+            "initial_state": {
+                "environment": {
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    }
+                }
+            },
             "criteria": [
                 EvaluationCriterion(
                     criterion_id="test",
@@ -831,7 +849,16 @@ class TestScenarioConfig:
             user_prompt="Test prompt.",
             user_character="bob",
             characters={"bob": sample_character_with_phone},
-            initial_state={},
+            initial_state={
+                "environment": {
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    }
+                }
+            },
             criteria=[criterion],
         )
 
@@ -882,7 +909,16 @@ class TestScenarioConfig:
             user_prompt="Test prompt.",
             user_character="alice",
             characters={"alice": sample_character},
-            initial_state={},
+            initial_state={
+                "environment": {
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    }
+                }
+            },
             criteria=criteria,
         )
 
@@ -934,7 +970,16 @@ class TestScenarioConfig:
             user_prompt="Test prompt.",
             user_character="alice",
             characters={"alice": sample_character},
-            initial_state={},
+            initial_state={
+                "environment": {
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    }
+                }
+            },
             criteria=criteria,
         )
 
@@ -978,7 +1023,16 @@ class TestScenarioConfig:
             user_prompt="Test prompt.",
             user_character="alice",
             characters={"alice": sample_character},
-            initial_state={},
+            initial_state={
+                "environment": {
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    }
+                }
+            },
             criteria=criteria,
         )
 
@@ -1060,6 +1114,113 @@ class TestScenarioConfig:
         assert "user_character" in str(exc_info.value)
         assert "nonexistent" in str(exc_info.value)
         assert "not found in characters" in str(exc_info.value)
+
+    def test_initial_state_must_include_all_modalities(
+        self, sample_character: CharacterProfile
+    ):
+        """Test that initial_state must include all four modalities."""
+        criterion = EvaluationCriterion(
+            criterion_id="test",
+            name="Test",
+            description="Test.",
+            dimension="accuracy",
+            max_score=10,
+            evaluator_id="test",
+        )
+
+        # Missing all modalities
+        with pytest.raises(ValidationError) as exc_info:
+            ScenarioConfig(
+                scenario_id="test",
+                name="Test",
+                description="Test scenario.",
+                start_time=datetime(2026, 1, 28, 9, 0, tzinfo=timezone.utc),
+                end_time=datetime(2026, 1, 28, 17, 0, tzinfo=timezone.utc),
+                default_time_step="PT1H",
+                user_prompt="Test prompt.",
+                user_character="alice",
+                characters={"alice": sample_character},
+                initial_state={"environment": {"modality_states": {}}},
+                criteria=[criterion],
+            )
+        assert "Missing" in str(exc_info.value)
+        assert "all four modalities" in str(exc_info.value)
+
+        # Missing some modalities
+        with pytest.raises(ValidationError) as exc_info:
+            ScenarioConfig(
+                scenario_id="test",
+                name="Test",
+                description="Test scenario.",
+                start_time=datetime(2026, 1, 28, 9, 0, tzinfo=timezone.utc),
+                end_time=datetime(2026, 1, 28, 17, 0, tzinfo=timezone.utc),
+                default_time_step="PT1H",
+                user_prompt="Test prompt.",
+                user_character="alice",
+                characters={"alice": sample_character},
+                initial_state={
+                    "environment": {
+                        "modality_states": {
+                            "email": {"modality_type": "email"},
+                        }
+                    }
+                },
+                criteria=[criterion],
+            )
+        error_str = str(exc_info.value)
+        assert "Missing" in error_str
+        for modality in ["calendar", "chat", "sms"]:
+            assert modality in error_str
+
+        # Wrapped format also validated
+        with pytest.raises(ValidationError) as exc_info:
+            ScenarioConfig(
+                scenario_id="test",
+                name="Test",
+                description="Test scenario.",
+                start_time=datetime(2026, 1, 28, 9, 0, tzinfo=timezone.utc),
+                end_time=datetime(2026, 1, 28, 17, 0, tzinfo=timezone.utc),
+                default_time_step="PT1H",
+                user_prompt="Test prompt.",
+                user_character="alice",
+                characters={"alice": sample_character},
+                initial_state={
+                    "scenario": {
+                        "environment": {
+                            "modality_states": {
+                                "email": {"modality_type": "email"},
+                            }
+                        }
+                    }
+                },
+                criteria=[criterion],
+            )
+        assert "Missing" in str(exc_info.value)
+
+        # All four present — should succeed
+        config = ScenarioConfig(
+            scenario_id="test",
+            name="Test",
+            description="Test scenario.",
+            start_time=datetime(2026, 1, 28, 9, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 1, 28, 17, 0, tzinfo=timezone.utc),
+            default_time_step="PT1H",
+            user_prompt="Test prompt.",
+            user_character="alice",
+            characters={"alice": sample_character},
+            initial_state={
+                "environment": {
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    }
+                }
+            },
+            criteria=[criterion],
+        )
+        assert config.initial_state is not None
 
     def test_get_user_character_profile(self, sample_scenario: ScenarioConfig):
         """Test get_user_character_profile method."""

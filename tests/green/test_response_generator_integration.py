@@ -272,7 +272,16 @@ def sample_scenario(
             "alice": alice_character,
             "bob": bob_character,
         },
-        initial_state={"environment": {}},
+        initial_state={
+            "environment": {
+                "modality_states": {
+                    "email": {"modality_type": "email"},
+                    "sms": {"modality_type": "sms"},
+                    "calendar": {"modality_type": "calendar"},
+                    "chat": {"modality_type": "chat"},
+                }
+            }
+        },
         criteria=[sample_criterion],
     )
 

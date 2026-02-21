@@ -1637,7 +1637,12 @@ class TestEdgeCases:
                         "auto_advance": False,
                         "last_wall_time_update": "2026-02-09T09:00:00+00:00",
                     },
-                    "modality_states": {},
+                    "modality_states": {
+                        "email": {"modality_type": "email"},
+                        "sms": {"modality_type": "sms"},
+                        "calendar": {"modality_type": "calendar"},
+                        "chat": {"modality_type": "chat"},
+                    },
                 },
                 "events": {
                     "events": [],

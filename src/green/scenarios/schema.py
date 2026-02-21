@@ -632,6 +632,36 @@ class ScenarioConfig(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_initial_state_modalities(self) -> "ScenarioConfig":
+        """Ensure initial_state includes all four required modalities.
+
+        Every scenario must include email, sms, calendar, and chat modality
+        states — even if empty — so that the Green agent can unconditionally
+        query all modalities during assessment without risking errors from
+        missing modalities in UES.
+        """
+        required = {"email", "sms", "calendar", "chat"}
+
+        # Handle both wrapped and unwrapped initial_state formats
+        state = self.initial_state
+        if "scenario" in state and "metadata" not in state:
+            state = state["scenario"]
+
+        env = state.get("environment", {})
+        modality_states = env.get("modality_states", {})
+        present = set(modality_states.keys())
+        missing = required - present
+
+        if missing:
+            raise ValueError(
+                f"initial_state must include all four modalities. "
+                f"Missing: {sorted(missing)}. "
+                f"Present: {sorted(present)}. "
+                f"Add empty state dicts for unused modalities."
+            )
+        return self
+
     @property
     def default_time_step_timedelta(self) -> timedelta:
         """Get the default time step as a timedelta.
