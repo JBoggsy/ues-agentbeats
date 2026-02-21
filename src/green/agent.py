@@ -1175,10 +1175,21 @@ class GreenAgent:
         # Clear UES state (removes all events and modality states)
         await self.ues_client.simulation.clear()
 
-        # Load scenario initial state via client library
+        # Load scenario initial state via client library.
+        # initial_state may be the raw request body (with "scenario" and
+        # "strict_modalities" wrappers) or just the inner scenario dict.
+        # Unwrap if needed — import_full() adds its own wrapper.
+        state = scenario.initial_state
+        if "scenario" in state and "metadata" not in state:
+            # Wrapped format: {"scenario": {...}, "strict_modalities": ...}
+            strict = state.get("strict_modalities", False)
+            state = state["scenario"]
+        else:
+            strict = False
+
         await self.ues_client.scenario.import_full(
-            scenario=scenario.initial_state,
-            strict_modalities=False,
+            scenario=state,
+            strict_modalities=strict,
         )
 
         # Start simulation with manual time control (Green advances time)
