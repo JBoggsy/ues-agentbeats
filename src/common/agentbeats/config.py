@@ -320,15 +320,15 @@ class GreenAgentConfig(AgentBeatsConfig):
         description="Default timeout per turn in seconds",
     )
     response_generator_model: str = Field(
-        default="gpt-4o-mini",
+        default="ollama/gpt-oss:20b",
         description="LLM model for should-respond checks and response generation",
     )
     summarization_model: str = Field(
-        default="gpt-4o-mini",
+        default="ollama/gpt-oss:20b",
         description="LLM model for summarizing long thread histories (can be cheaper/faster)",
     )
     evaluation_model: str = Field(
-        default="gpt-4o",
+        default="ollama/gpt-oss:20b",
         description="LLM model for evaluating Purple agent performance",
     )
 
